@@ -1,0 +1,1 @@
+Otevřete tuto složku jako projekt v Android Studio. Gradle wrapper se vytvoří/synchronizuje v IDE.

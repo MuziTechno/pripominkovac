@@ -1,0 +1,1 @@
+<resources><style name="Theme.Nezapomen" parent="Theme.MaterialComponents.DayNight.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:colorAccent">#9A654C</item><item name="android:navigationBarColor">#F6F3EE</item><item name="android:statusBarColor">#E7F0EC</item><item name="android:windowLightStatusBar">true</item></style></resources>
