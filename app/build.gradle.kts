@@ -8,7 +8,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "cz.nezapomen.app"
+        applicationId = "cz.muzitechno.pripominkovac"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -20,11 +20,14 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions { jvmTarget = "17" }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
 
     signingConfigs {
         create("release") {
             val keystorePath = System.getenv("KEYSTORE_PATH")
+
             if (!keystorePath.isNullOrBlank()) {
                 storeFile = file(keystorePath)
                 storePassword = System.getenv("KEYSTORE_PASSWORD")
@@ -41,7 +44,9 @@ android {
         }
     }
 
-    buildFeatures { buildConfig = true }
+    buildFeatures {
+        buildConfig = true
+    }
 }
 
 dependencies {
@@ -49,4 +54,3 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
 }
-
