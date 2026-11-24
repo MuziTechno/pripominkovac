@@ -2,22 +2,27 @@ package cz.nezapomen.app
 
 import android.Manifest
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import kotlin.math.max
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    private lateinit var safeContainer: FrameLayout
 
     private val requestNotifications =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -25,9 +30,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Android 15/16 vykresluje aplikace edge-to-edge. Obsah proto musí
-        // respektovat stavovou a navigační lištu pomocí WindowInsets.
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
 
         if (android.os.Build.VERSION.SDK_INT >= 33) {
@@ -43,39 +48,47 @@ class MainActivity : AppCompatActivity() {
             loadUrl("file:///android_asset/index.html")
         }
 
-        ViewCompat.setOnApplyWindowInsetsListener(webView) { view, windowInsets ->
-            val systemBars: Insets = windowInsets.getInsets(
+        safeContainer = FrameLayout(this).apply {
+            setBackgroundColor(Color.rgb(246, 243, 238))
+            addView(
+                webView,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+
+        ViewCompat.setOnApplyWindowInsetsListener(safeContainer) { view, insets ->
+            val bars: Insets = insets.getInsets(
                 WindowInsetsCompat.Type.statusBars() or
                     WindowInsetsCompat.Type.navigationBars() or
                     WindowInsetsCompat.Type.displayCutout()
             )
+            val ime: Insets = insets.getInsets(WindowInsetsCompat.Type.ime())
 
-            // Horní padding chrání vyhledávání před stavovou lištou.
-            // Spodní padding chrání Budík/Přidat před systémovou navigací.
+            // Při otevřené klávesnici použijeme její výšku místo navigační lišty.
+            val safeBottom = max(bars.bottom, ime.bottom)
+
             view.setPadding(
-                systemBars.left,
-                systemBars.top,
-                systemBars.right,
-                systemBars.bottom
+                bars.left,
+                bars.top,
+                bars.right,
+                safeBottom
             )
 
-            windowInsets
+            WindowInsetsCompat.CONSUMED
         }
 
-        setContentView(webView)
-        ViewCompat.requestApplyInsets(webView)
+        setContentView(safeContainer)
+        ViewCompat.requestApplyInsets(safeContainer)
     }
 
     inner class AndroidBridge {
         @JavascriptInterface
         fun scheduleAlarm(id: String, text: String, epochMs: Long) =
             runOnUiThread {
-                AlarmScheduler.schedule(
-                    context = this@MainActivity,
-                    id = id,
-                    text = text,
-                    at = epochMs
-                )
+                AlarmScheduler.schedule(this@MainActivity, id, text, epochMs)
             }
 
         @JavascriptInterface
