@@ -4,18 +4,24 @@ import android.Manifest
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    private lateinit var root: FrameLayout
 
     private val requestNotifications =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -23,12 +29,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Nepoužívat edge-to-edge. Android sám vyhradí skutečný prostor
-        // pro stavovou a navigační lištu, takže systémové vrstvy nepřekryjí
-        // hledání ani tlačítka Budík/Přidat a nebudou zachytávat jejich dotyky.
-        WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = Color.rgb(231, 240, 236)
-        window.navigationBarColor = Color.rgb(246, 243, 238)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
 
         if (android.os.Build.VERSION.SDK_INT >= 33) {
@@ -38,13 +41,56 @@ class MainActivity : AppCompatActivity() {
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            isVerticalScrollBarEnabled = false
             webViewClient = WebViewClient()
             webChromeClient = WebChromeClient()
             addJavascriptInterface(AndroidBridge(), "Android")
             loadUrl("file:///android_asset/index.html")
         }
 
-        setContentView(webView)
+        root = FrameLayout(this).apply {
+            setBackgroundColor(Color.rgb(246, 243, 238))
+            addView(
+                webView,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val bars: Insets = insets.getInsets(
+                WindowInsetsCompat.Type.statusBars() or
+                    WindowInsetsCompat.Type.navigationBars() or
+                    WindowInsetsCompat.Type.displayCutout()
+            )
+
+            // DŮLEŽITÉ: používáme skutečné layout margins WebView, ne padding.
+            // Vykreslení i dotykové souřadnice se tak posunou společně.
+            val params = webView.layoutParams as FrameLayout.LayoutParams
+            if (
+                params.leftMargin != bars.left ||
+                params.topMargin != bars.top ||
+                params.rightMargin != bars.right ||
+                params.bottomMargin != bars.bottom
+            ) {
+                params.setMargins(
+                    bars.left,
+                    bars.top,
+                    bars.right,
+                    bars.bottom
+                )
+                webView.layoutParams = params
+            }
+
+            // IME sem nepřičítáme. Klávesnici řeší adjustResize, aby se spodní
+            // editor neposunul dvakrát a dotyková mapa zůstala správná.
+            insets
+        }
+
+        setContentView(root)
+        ViewCompat.requestApplyInsets(root)
     }
 
     inner class AndroidBridge {
