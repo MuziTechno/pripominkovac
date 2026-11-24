@@ -1,1 +1,54 @@
-<!doctype html><html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="stylesheet" href="styles.css"><title>Poznámky</title></head><body><div id="app"><header><input id="search" placeholder="Hledat v zápiscích…"><nav><button data-view="all" class="active">Vše</button><button data-view="pinned">Připnuté</button><button data-view="trash">Koš</button><button id="settings">⚙</button></nav></header><main id="feed"></main><footer><textarea id="draft" placeholder="Napiš nebo nadiktuj zápisek…"></textarea><div><button id="alarm">⏰ Budík</button><button id="add">Přidat</button></div></footer></div><dialog id="alarmDialog"><h2>Nastavit upomínku</h2><div id="quick"></div><label>Vlastní datum a čas<input id="datetime" type="datetime-local"></label><menu><button id="cancelAlarm">Zrušit</button><button id="saveAlarm">Uložit</button></menu></dialog><dialog id="menuDialog"><h2>Možnosti zápisku</h2><div id="menuItems"></div><button id="closeMenu">Zavřít</button></dialog><script type="module" src="app.js"></script></body></html>
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <link rel="stylesheet" href="styles.css">
+  <title>Připomínkovač</title>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <input id="search" type="search" placeholder="Hledat v zápiscích…" aria-label="Hledat v zápiscích">
+      <nav>
+        <button type="button" data-view="all" class="active">Vše</button>
+        <button type="button" data-view="pinned">Připnuté</button>
+        <button type="button" data-view="trash">Koš</button>
+        <button type="button" id="settings" aria-label="Nastavení">⚙</button>
+      </nav>
+    </header>
+
+    <main id="feed"></main>
+
+    <footer>
+      <textarea id="draft" placeholder="Napiš nebo nadiktuj zápisek…" aria-label="Nový zápisek"></textarea>
+      <div>
+        <button type="button" id="alarm">⏰ Budík</button>
+        <button type="button" id="add">Přidat</button>
+      </div>
+    </footer>
+  </div>
+
+  <dialog id="alarmDialog">
+    <h2>Nastavit upomínku</h2>
+    <div id="quick"></div>
+    <label>
+      Vlastní datum a čas
+      <input id="datetime" type="datetime-local">
+    </label>
+    <menu>
+      <button type="button" id="cancelAlarm">Zrušit</button>
+      <button type="button" id="saveAlarm">Uložit</button>
+    </menu>
+  </dialog>
+
+  <dialog id="menuDialog">
+    <h2>Možnosti zápisku</h2>
+    <div id="menuItems"></div>
+    <button type="button" id="closeMenu">Zavřít</button>
+  </dialog>
+
+  <!-- Klasický defer script. type=module se z file:// v Android WebView nenačetl. -->
+  <script defer src="app.js"></script>
+</body>
+</html>
