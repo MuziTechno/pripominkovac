@@ -1,1 +1,245 @@
-const $=s=>document.querySelector(s);const feed=$("#feed"),draft=$("#draft"),search=$("#search"),alarmDialog=$("#alarmDialog"),menuDialog=$("#menuDialog");let notes=JSON.parse(localStorage.getItem("notes")||"[]"),view="all",draftAlarm=null,target=null;const save=()=>{localStorage.setItem("notes",JSON.stringify(notes));syncAlarms()};const syncAlarms=()=>{const a=notes.filter(n=>!n.deleted&&n.alarm&&n.alarm>Date.now()).map(n=>({id:String(n.id),text:n.text,at:n.alarm}));if(window.Android)Android.saveAlarmIndex(JSON.stringify(a))};const fmt=t=>new Date(t).toLocaleString("cs-CZ",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"});function render(scroll=false){const q=search.value.toLowerCase(),now=Date.now();const list=notes.filter(n=>(view==="trash"?n.deleted:!n.deleted)&&(view!=="pinned"||n.pinned)&&n.text.toLowerCase().includes(q));feed.innerHTML=list.map(n=>`<article class="note" data-id="${n.id}"><div class="top"><div class="text">${n.text.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))}</div><div class="tools"><button data-a="share">↗</button><button data-a="menu">⋮</button></div></div>${n.alarm?`<button data-a="alarm" class="alarm ${n.alarm<now?'overdue':''}">${n.alarm<now?'⚠ Po termínu: ':'⏰ '}${fmt(n.alarm)}</button>`:''}<div class="meta"><span>${fmt(n.created)}</span><span>${n.pinned?'📌 Připnuto':''}</span></div></article>`).join("")||"<p>Žádné zápisky.</p>";if(scroll)feed.scrollTop=feed.scrollHeight}function openAlarm(n=null){target=n;$("#datetime").value=n?.alarm?new Date(n.alarm-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16):"";alarmDialog.showModal()}[{m:5,t:"5 minut"},{m:10,t:"10 minut"},{m:30,t:"30 minut"},{m:60,t:"1 hodina"},{m:120,t:"2 hodiny"},{m:180,t:"3 hodiny"}].forEach(x=>{const b=document.createElement("button");b.textContent=x.t;b.onclick=()=>setAlarm(Date.now()+x.m*60000);$("#quick").append(b)});function setAlarm(at){if(target){target.alarm=at;Android?.scheduleAlarm(String(target.id),target.text,at)}else draftAlarm=at;save();alarmDialog.close();render()}$("#saveAlarm").onclick=()=>{const at=new Date($("#datetime").value).getTime();if(at>Date.now())setAlarm(at)};$("#cancelAlarm").onclick=()=>alarmDialog.close();$("#alarm").onclick=()=>openAlarm();$("#add").onclick=()=>{const text=draft.value.trim();if(!text)return;const n={id:Date.now(),text,created:Date.now(),alarm:draftAlarm,pinned:false,deleted:false};notes.push(n);if(n.alarm)Android?.scheduleAlarm(String(n.id),n.text,n.alarm);draft.value="";draftAlarm=null;save();render(true);draft.blur()};draft.value=localStorage.getItem("draft")||"";draft.oninput=()=>localStorage.setItem("draft",draft.value);search.oninput=()=>render();document.querySelectorAll("nav [data-view]").forEach(b=>b.onclick=()=>{view=b.dataset.view;document.querySelectorAll("nav [data-view]").forEach(x=>x.classList.toggle("active",x===b));render()});feed.onclick=e=>{const card=e.target.closest(".note");if(!card)return;target=notes.find(n=>n.id==card.dataset.id);const a=e.target.dataset.a;if(a==="alarm")openAlarm(target);if(a==="share")Android?.share(target.text);if(a==="menu")openMenu()};function openMenu(){const box=$("#menuItems");box.innerHTML="";const items=target.deleted?[["Obnovit","restore"],["Smazat natrvalo","perma"]]:[["Upravit text","edit"],["Změnit upomínku","alarm"],[target.pinned?"Odepnout":"Připnout","pin"],["Poslat e-mailem","email"],["Přesunout do koše","delete"]];items.forEach(([t,a])=>{const b=document.createElement("button");b.className="menu-item";b.textContent=t;b.onclick=()=>menuAction(a);box.append(b)});menuDialog.showModal()}function menuAction(a){if(a==="edit"){const v=prompt("Upravit text",target.text);if(v?.trim())target.text=v.trim()}if(a==="alarm"){menuDialog.close();openAlarm(target);return}if(a==="pin")target.pinned=!target.pinned;if(a==="email")Android?.email(target.text);if(a==="delete"){target.deleted=true;Android?.cancelAlarm(String(target.id))}if(a==="restore")target.deleted=false;if(a==="perma")notes=notes.filter(n=>n!==target);save();menuDialog.close();render()}$("#closeMenu").onclick=()=>menuDialog.close();$("#settings").onclick=()=>alert("Nastavení doplníme v další verzi.");render(true);
+(function () {
+  "use strict";
+
+  function $(selector) {
+    return document.querySelector(selector);
+  }
+
+  const feed = $("#feed");
+  const draft = $("#draft");
+  const search = $("#search");
+  const alarmDialog = $("#alarmDialog");
+  const menuDialog = $("#menuDialog");
+  const addButton = $("#add");
+  const alarmButton = $("#alarm");
+
+  let notes = [];
+  try {
+    notes = JSON.parse(localStorage.getItem("notes") || "[]");
+    if (!Array.isArray(notes)) notes = [];
+  } catch (_) {
+    notes = [];
+  }
+
+  let view = "all";
+  let draftAlarm = null;
+  let target = null;
+
+  function androidCall(method, ...args) {
+    if (window.Android && typeof window.Android[method] === "function") {
+      window.Android[method](...args);
+    }
+  }
+
+  function syncAlarms() {
+    const alarms = notes
+      .filter((note) => !note.deleted && note.alarm && note.alarm > Date.now())
+      .map((note) => ({ id: String(note.id), text: note.text, at: note.alarm }));
+    androidCall("saveAlarmIndex", JSON.stringify(alarms));
+  }
+
+  function save() {
+    localStorage.setItem("notes", JSON.stringify(notes));
+    syncAlarms();
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[char]);
+  }
+
+  function formatDate(timestamp) {
+    return new Date(timestamp).toLocaleString("cs-CZ", {
+      day: "numeric",
+      month: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
+  function render(scrollToBottom) {
+    const query = search.value.trim().toLocaleLowerCase("cs");
+    const now = Date.now();
+    const visible = notes.filter((note) => {
+      if (view === "trash" ? !note.deleted : note.deleted) return false;
+      if (view === "pinned" && !note.pinned) return false;
+      return !query || note.text.toLocaleLowerCase("cs").includes(query);
+    });
+
+    feed.innerHTML = visible.length
+      ? visible.map((note) => `
+          <article class="note" data-id="${note.id}">
+            <div class="top">
+              <div class="text">${escapeHtml(note.text)}</div>
+              <div class="tools">
+                <button type="button" data-action="share" aria-label="Sdílet">↗</button>
+                <button type="button" data-action="menu" aria-label="Možnosti">⋮</button>
+              </div>
+            </div>
+            ${note.alarm ? `
+              <button type="button" data-action="alarm" class="alarm ${note.alarm < now ? "overdue" : ""}">
+                ${note.alarm < now ? "⚠ Po termínu: " : "⏰ "}${formatDate(note.alarm)}
+              </button>` : ""}
+            <div class="meta">
+              <span>${formatDate(note.created)}</span>
+              <span>${note.pinned ? "📌 Připnuto" : ""}</span>
+            </div>
+          </article>`).join("")
+      : "<p>Žádné zápisky.</p>";
+
+    if (scrollToBottom) feed.scrollTop = feed.scrollHeight;
+  }
+
+  function openAlarm(note) {
+    target = note || null;
+    const value = target && target.alarm
+      ? new Date(target.alarm - new Date().getTimezoneOffset() * 60000)
+          .toISOString().slice(0, 16)
+      : "";
+    $("#datetime").value = value;
+    alarmDialog.showModal();
+  }
+
+  function setAlarm(timestamp) {
+    if (target) {
+      target.alarm = timestamp;
+      androidCall("scheduleAlarm", String(target.id), target.text, timestamp);
+    } else {
+      draftAlarm = timestamp;
+    }
+    save();
+    alarmDialog.close();
+    render(false);
+  }
+
+  [
+    [5, "5 minut"], [10, "10 minut"], [30, "30 minut"],
+    [60, "1 hodina"], [120, "2 hodiny"], [180, "3 hodiny"]
+  ].forEach(([minutes, label]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.addEventListener("click", () => setAlarm(Date.now() + minutes * 60000));
+    $("#quick").appendChild(button);
+  });
+
+  $("#saveAlarm").addEventListener("click", () => {
+    const timestamp = new Date($("#datetime").value).getTime();
+    if (Number.isFinite(timestamp) && timestamp > Date.now()) setAlarm(timestamp);
+  });
+
+  $("#cancelAlarm").addEventListener("click", () => alarmDialog.close());
+  alarmButton.addEventListener("click", () => openAlarm(null));
+
+  addButton.addEventListener("click", () => {
+    const text = draft.value.trim();
+    if (!text) return;
+
+    const note = {
+      id: Date.now(),
+      text,
+      created: Date.now(),
+      alarm: draftAlarm,
+      pinned: false,
+      deleted: false
+    };
+
+    notes.push(note);
+    if (note.alarm) {
+      androidCall("scheduleAlarm", String(note.id), note.text, note.alarm);
+    }
+
+    draft.value = "";
+    localStorage.removeItem("draft");
+    draftAlarm = null;
+    save();
+    render(true);
+    draft.blur();
+  });
+
+  draft.value = localStorage.getItem("draft") || "";
+  draft.addEventListener("input", () => localStorage.setItem("draft", draft.value));
+  search.addEventListener("input", () => render(false));
+
+  document.querySelectorAll("nav [data-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      view = button.dataset.view;
+      document.querySelectorAll("nav [data-view]").forEach((item) => {
+        item.classList.toggle("active", item === button);
+      });
+      render(false);
+    });
+  });
+
+  feed.addEventListener("click", (event) => {
+    const card = event.target.closest(".note");
+    if (!card) return;
+    target = notes.find((note) => String(note.id) === card.dataset.id);
+    if (!target) return;
+
+    const action = event.target.closest("button")?.dataset.action;
+    if (action === "alarm") openAlarm(target);
+    if (action === "share") androidCall("share", target.text);
+    if (action === "menu") openMenu();
+  });
+
+  function openMenu() {
+    const box = $("#menuItems");
+    box.innerHTML = "";
+    const items = target.deleted
+      ? [["Obnovit", "restore"], ["Smazat natrvalo", "permanentDelete"]]
+      : [
+          ["Upravit text", "edit"],
+          ["Změnit upomínku", "alarm"],
+          [target.pinned ? "Odepnout" : "Připnout", "pin"],
+          ["Poslat e-mailem", "email"],
+          ["Přesunout do koše", "delete"]
+        ];
+
+    items.forEach(([label, action]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "menu-item";
+      button.textContent = label;
+      button.addEventListener("click", () => menuAction(action));
+      box.appendChild(button);
+    });
+    menuDialog.showModal();
+  }
+
+  function menuAction(action) {
+    if (action === "edit") {
+      const value = prompt("Upravit text", target.text);
+      if (value && value.trim()) target.text = value.trim();
+    }
+    if (action === "alarm") {
+      menuDialog.close();
+      openAlarm(target);
+      return;
+    }
+    if (action === "pin") target.pinned = !target.pinned;
+    if (action === "email") androidCall("email", target.text);
+    if (action === "delete") {
+      target.deleted = true;
+      androidCall("cancelAlarm", String(target.id));
+    }
+    if (action === "restore") target.deleted = false;
+    if (action === "permanentDelete") notes = notes.filter((note) => note !== target);
+
+    save();
+    menuDialog.close();
+    render(false);
+  }
+
+  $("#closeMenu").addEventListener("click", () => menuDialog.close());
+  $("#settings").addEventListener("click", () => {
+    alert("Nastavení doplníme v další verzi.");
+  });
+
+  render(true);
+})();
