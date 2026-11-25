@@ -14,30 +14,36 @@ import android.os.VibratorManager
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import org.json.JSONArray
+import org.json.JSONObject
+import java.time.Instant
+import java.time.Year
+import java.time.ZoneId
+import java.time.ZonedDateTime
 
 class RingActivity : AppCompatActivity() {
 
     private var mediaPlayer: MediaPlayer? = null
     private var alarmId: String = ""
     private var alarmText: String = ""
+    private var repeatRule: String = "none"
+    private var baseAt: Long = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         alarmId = intent.getStringExtra("id") ?: ""
         alarmText = intent.getStringExtra("text") ?: "Upomínka"
+        repeatRule = intent.getStringExtra("repeat") ?: "none"
+        baseAt = intent.getLongExtra("baseAt", System.currentTimeMillis())
 
         setShowWhenLocked(true)
         setTurnScreenOn(true)
-
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-        )
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         startAlarmSound()
         startVibration()
@@ -48,102 +54,152 @@ class RingActivity : AppCompatActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(32, 48, 32, 48)
+            setPadding(24, 40, 24, 40)
             setBackgroundColor(Color.rgb(231, 240, 236))
         }
 
-        val alarmIcon = TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = "⏰"
-            textSize = 64f
+            textSize = 56f
             gravity = Gravity.CENTER
-        }
+        })
 
-        val message = TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = alarmText
             textSize = 26f
             gravity = Gravity.CENTER
-            setTextColor(Color.rgb(52, 65, 63))
-            setPadding(0, 24, 0, 32)
-        }
+            setPadding(0, 20, 0, 24)
+        })
 
-        val stopButton = Button(this).apply {
+        root.addView(Button(this).apply {
             text = "Vypnout"
             setOnClickListener {
-                stopAlarmAndClose()
-            }
-        }
-
-        val snoozeHeading = TextView(this).apply {
-            text = "Odložit"
-            textSize = 18f
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(52, 65, 63))
-            setPadding(0, 24, 0, 8)
-        }
-
-        val snoozeButtons = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-
-        val snoozeOptions = listOf(
-            5 to "5 min",
-            10 to "10 min",
-            30 to "30 min",
-            60 to "1 hod",
-            120 to "2 hod",
-            180 to "3 hod"
-        )
-
-        snoozeOptions.forEach { option ->
-            val delayMinutes: Int = option.first
-            val buttonLabel: String = option.second
-
-            val snoozeButton = Button(this).apply {
-                text = buttonLabel
-
-                setOnClickListener {
-                    val nextAlarmTime =
-                        System.currentTimeMillis() + delayMinutes.toLong() * 60_000L
-
+                if (repeatRule == "none") {
+                    recordAlarmUpdate(alarmId, 0L, 0L, true)
+                } else {
+                    val nextAt = calculateNextOccurrence(baseAt, repeatRule)
                     AlarmScheduler.schedule(
                         context = this@RingActivity,
                         id = alarmId,
                         text = alarmText,
-                        at = nextAlarmTime
+                        at = nextAt,
+                        repeat = repeatRule,
+                        baseAt = nextAt
                     )
-
-                    stopAlarmAndClose()
+                    recordAlarmUpdate(alarmId, nextAt, nextAt, false)
                 }
+                stopAlarmAndClose()
             }
+        })
 
-            snoozeButtons.addView(snoozeButton)
+        root.addView(TextView(this).apply {
+            text = "Odložit"
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setPadding(0, 20, 0, 6)
+        })
+
+        val snoozeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
         }
 
-        root.addView(alarmIcon)
-        root.addView(message)
-        root.addView(stopButton)
-        root.addView(snoozeHeading)
-        root.addView(snoozeButtons)
+        listOf(5, 10, 30, 60, 120, 180).forEach { minutes ->
+            snoozeRow.addView(Button(this).apply {
+                text = if (minutes < 60) "$minutes min" else "${minutes / 60} h"
+                setOnClickListener {
+                    val snoozeAt = System.currentTimeMillis() + minutes.toLong() * 60_000L
+                    AlarmScheduler.schedule(
+                        context = this@RingActivity,
+                        id = alarmId,
+                        text = alarmText,
+                        at = snoozeAt,
+                        repeat = repeatRule,
+                        baseAt = baseAt
+                    )
+                    recordAlarmUpdate(alarmId, snoozeAt, baseAt, false)
+                    stopAlarmAndClose()
+                }
+            })
+        }
+
+        root.addView(HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(snoozeRow)
+        })
 
         return root
     }
 
+    private fun recordAlarmUpdate(id: String, newAt: Long, newBaseAt: Long, dismissed: Boolean) {
+        val prefs = getSharedPreferences("alarms", Context.MODE_PRIVATE)
+        val updatesRaw = prefs.getString("updates", "[]") ?: "[]"
+        val updates = JSONArray(updatesRaw)
+        updates.put(JSONObject().apply {
+            put("id", id)
+            put("at", newAt)
+            put("baseAt", newBaseAt)
+            put("dismissed", dismissed)
+        })
+
+        val indexRaw = prefs.getString("index", "[]") ?: "[]"
+        val oldIndex = JSONArray(indexRaw)
+        val newIndex = JSONArray()
+        for (i in 0 until oldIndex.length()) {
+            val item = oldIndex.getJSONObject(i)
+            if (item.getString("id") == id) {
+                if (!dismissed && newAt > 0L) {
+                    item.put("at", newAt)
+                    item.put("baseAt", newBaseAt)
+                    newIndex.put(item)
+                }
+            } else {
+                newIndex.put(item)
+            }
+        }
+
+        prefs.edit()
+            .putString("updates", updates.toString())
+            .putString("index", newIndex.toString())
+            .apply()
+    }
+
+    private fun calculateNextOccurrence(from: Long, rule: String): Long {
+        val current = Instant.ofEpochMilli(from).atZone(ZoneId.systemDefault())
+        val next: ZonedDateTime = when (rule) {
+            "daily" -> current.plusDays(1)
+            "weekly" -> current.plusWeeks(1)
+            "monthly" -> {
+                val candidate = current.plusMonths(1)
+                val day = minOf(current.dayOfMonth, candidate.toLocalDate().lengthOfMonth())
+                candidate.withDayOfMonth(day)
+            }
+            "yearly" -> {
+                val nextYear = current.year + 1
+                val day = if (
+                    current.monthValue == 2 &&
+                    current.dayOfMonth == 29 &&
+                    !Year.isLeap(nextYear.toLong())
+                ) 28 else current.dayOfMonth
+                current.withYear(nextYear).withDayOfMonth(day)
+            }
+            else -> current
+        }
+        return next.toInstant().toEpochMilli()
+    }
+
     private fun startAlarmSound() {
-        val alarmUri =
-            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 
         mediaPlayer = MediaPlayer().apply {
             setDataSource(this@RingActivity, alarmUri)
-
             setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build()
             )
-
             isLooping = true
             prepare()
             start()
@@ -151,67 +207,36 @@ class RingActivity : AppCompatActivity() {
     }
 
     private fun startVibration() {
-        val vibrationPattern = longArrayOf(
-            0L,
-            700L,
-            300L,
-            700L,
-            300L
-        )
-
+        val pattern = longArrayOf(0L, 700L, 300L)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val vibratorManager =
-                getSystemService(VibratorManager::class.java)
-
-            vibratorManager.defaultVibrator.vibrate(
-                VibrationEffect.createWaveform(
-                    vibrationPattern,
-                    1
-                )
-            )
+            getSystemService(VibratorManager::class.java)
+                .defaultVibrator
+                .vibrate(VibrationEffect.createWaveform(pattern, 0))
         } else {
             @Suppress("DEPRECATION")
-            val vibrator =
-                getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-
-            vibrator.vibrate(
-                VibrationEffect.createWaveform(
-                    vibrationPattern,
-                    1
-                )
-            )
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0))
         }
     }
 
     private fun stopVibration() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val vibratorManager =
-                getSystemService(VibratorManager::class.java)
-
-            vibratorManager.defaultVibrator.cancel()
+            getSystemService(VibratorManager::class.java).defaultVibrator.cancel()
         } else {
             @Suppress("DEPRECATION")
-            val vibrator =
-                getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
             vibrator.cancel()
         }
     }
 
     private fun stopAlarmAndClose() {
         mediaPlayer?.run {
-            if (isPlaying) {
-                stop()
-            }
+            if (isPlaying) stop()
             release()
         }
-
         mediaPlayer = null
         stopVibration()
-
-        getSystemService(NotificationManager::class.java)
-            .cancel(alarmId.hashCode())
-
+        getSystemService(NotificationManager::class.java).cancel(alarmId.hashCode())
         finishAndRemoveTask()
     }
 
@@ -219,7 +244,6 @@ class RingActivity : AppCompatActivity() {
         mediaPlayer?.release()
         mediaPlayer = null
         stopVibration()
-
         super.onDestroy()
     }
 }
