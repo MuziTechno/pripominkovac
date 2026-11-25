@@ -366,27 +366,32 @@
 
     const systemPrompt = "Jsi osobní asistent v aplikaci Připomínkovač a InfoKanál. Dnešní datum a čas je " + new Date().toLocaleString("cs-CZ") + ".\nOdpovídej stručně, jasně a česky.\nUživatelovy uložené poznámky a budíky:\n" + activeNotesText + "\n\nAktuální zprávy z InfoKanálu:\n" + newsSummary;
 
-    const payload = JSON.stringify({
-      contents: [{ parts: [{ text: systemPrompt + "\n\nDotaz uživatele: " + question }] }],
-      tools: [{ googleSearch: {} }]
+        const payload = JSON.stringify({
+      contents: [{ parts: [{ text: systemPrompt + "\n\nDotaz uživatele: " + question }] }]
     });
 
     const reqId = "gem_" + Math.random().toString(36).slice(2);
     pendingGemini[reqId] = (ok, respBody) => {
       loadingBubble.remove();
       if (!ok) {
-        appendAiBubble("assistant", "Chyba při komunikaci s Gemini API. Zkontroluj API klíč nebo připojení k internetu.");
+        let errDetail = respBody;
+        try {
+          const errJson = JSON.parse(respBody);
+          errDetail = errJson?.error?.message || respBody;
+        } catch (_) {}
+        appendAiBubble("assistant", "Chyba Gemini API: " + errDetail);
         return;
       }
       try {
         const data = JSON.parse(respBody);
-        const parts = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
+        const parts = data?.candidates?.at(0)?.content?.parts;
         const answer = Array.isArray(parts) ? parts.map(p => p.text || "").join("") : "Nepodařilo se získat odpověď.";
         appendAiBubble("assistant", answer.trim(), true);
       } catch (_) {
         appendAiBubble("assistant", "Nepodařilo se zpracovat odpověď od Gemini.");
       }
     };
+
 
     if (androidCall("askGemini", reqId, apiKey, payload) === null) {
       loadingBubble.remove();
