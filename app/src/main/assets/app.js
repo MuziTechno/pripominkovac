@@ -508,6 +508,7 @@
       return;
     }
     const q = search.value.trim().toLocaleLowerCase("cs");
+        const filtered = newsItems.filter(item => {
       if (infoCat !== "all" && item.cat !== infoCat) return false;
       return !q || item.title.toLocaleLowerCase("cs").includes(q) || item.desc.toLocaleLowerCase("cs").includes(q);
     });
