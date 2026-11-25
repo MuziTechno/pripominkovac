@@ -230,18 +230,139 @@
     });
   }
 
+    let weatherCache = null;
+
+  function wmoToCzech(code) {
+    if (code === 0) return { icon: "☀️", text: "Jasno" };
+    if (code === 1 || code === 2) return { icon: "⛅", text: "Polojasno" };
+    if (code === 3) return { icon: "☁️", text: "Zataženo" };
+    if (code === 45 || code === 48) return { icon: "🌫️", text: "Mlha" };
+    if (code >= 51 && code <= 57) return { icon: "🌦️", text: "Mrholení" };
+    if (code >= 61 && code <= 67) return { icon: "🌧️", text: "Déšť" };
+    if (code >= 71 && code <= 77) return { icon: "❄️", text: "Sněžení" };
+    if (code >= 80 && code <= 82) return { icon: "🌦️", text: "Přeháňky" };
+    if (code >= 85 && code <= 86) return { icon: "🌨️", text: "Sněhové přeháňky" };
+    if (code >= 95) return { icon: "⛈️", text: "Bouřka" };
+    return { icon: "🌤️", text: "Proměnlivo" };
+  }
+
+  function fetchWeatherData() {
+    return new Promise(resolve => {
+      const reqId = "w_" + Math.random().toString(36).slice(2);
+      const wUrl = "https://" + "api." + "open-meteo." + "com/v1/forecast?latitude=50.11&longitude=14.50" +
+        "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m" +
+        "&hourly=temperature_2m,weather_code,precipitation_probability" +
+        "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+        "&timezone=Europe%2FPrague&forecast_days=5";
+
+      pendingFetches[reqId] = (ok, body) => {
+        if (!ok || !body) return resolve(null);
+        try {
+          resolve(JSON.parse(body));
+        } catch (_) {
+          resolve(null);
+        }
+      };
+      if (androidCall("fetchUrl", reqId, wUrl) === null) resolve(null);
+    });
+  }
+
+  function renderWeatherView() {
+    if (!weatherCache || !weatherCache.current) {
+      infoFeed.innerHTML = "<p style='text-align:center;color:#7b8885;margin-top:30px'>Nepodařilo se načíst počasí. Zkus obnovit (↻).</p>";
+      return;
+    }
+    const c = weatherCache.current;
+    const st = wmoToCzech(c.weather_code);
+    const nowHourIdx = Math.max(0, (weatherCache.hourly?.time || []).findIndex(t => Date.parse(t) >= Date.now() - 3600000));
+
+    const hourlyHtml = (weatherCache.hourly?.time || []).slice(nowHourIdx, nowHourIdx + 12).map((t, i) => {
+      const idx = nowHourIdx + i;
+      const hr = t.slice(11, 16);
+      const temp = Math.round(weatherCache.hourly.temperature_2m[idx]);
+      const pop = weatherCache.hourly.precipitation_probability?.[idx] ?? 0;
+      const hSt = wmoToCzech(weatherCache.hourly.weather_code[idx]);
+      return `<div class="weather-hour">
+        <span>${hr}</span>
+        <span style="font-size:18px;margin:4px 0">${hSt.icon}</span>
+        <strong>${temp}°</strong>
+        <span style="font-size:11px;color:#5a756c">${pop > 0 ? "💧" + pop + "%" : ""}</span>
+      </div>`;
+    }).join("");
+
+    const daysCz = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
+    const dailyHtml = (weatherCache.daily?.time || []).map((dStr, i) => {
+      const d = new Date(dStr + "T12:00:00");
+      const dayName = i === 0 ? "Dnes" : daysCz[d.getDay()] + " " + d.getDate() + "." + (d.getMonth() + 1) + ".";
+      const dSt = wmoToCzech(weatherCache.daily.weather_code[i]);
+      const tMin = Math.round(weatherCache.daily.temperature_2m_min[i]);
+      const tMax = Math.round(weatherCache.daily.temperature_2m_max[i]);
+      const pop = weatherCache.daily.precipitation_probability_max?.[i] ?? 0;
+      return `<div class="weather-day-row">
+        <span style="width:85px;font-weight:600">${dayName}</span>
+        <span>${dSt.icon} ${dSt.text}</span>
+        <span style="font-size:12px;color:#5a756c">${pop > 10 ? "💧" + pop + "%" : ""}</span>
+        <strong>${tMin}° / ${tMax}°</strong>
+      </div>`;
+    }).join("");
+
+    infoFeed.innerHTML = `
+      <article class="news-card" style="background:linear-gradient(135deg,#e7f0ec,#f7faf8)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span class="news-badge">Praha 9 · Právě teď</span>
+            <div style="font-size:42px;font-weight:700;color:#1a2b25;line-height:1.1">${Math.round(c.temperature_2m)} °C</div>
+            <div style="color:#314c44;font-weight:600;margin-top:4px">${st.text} · Pocitově ${Math.round(c.apparent_temperature)} °C</div>
+          </div>
+          <div style="font-size:56px">${st.icon}</div>
+        </div>
+        <div style="display:flex;gap:16px;margin-top:12px;padding-top:10px;border-top:1px solid #d5e2dd;font-size:13px;color:#314c44">
+          <span>💨 Vítr: ${Math.round(c.wind_speed_10m)} km/h</span>
+          <span>💧 Vlhkost: ${c.relative_humidity_2m} %</span>
+        </div>
+      </article>
+      <article class="news-card">
+        <span class="news-badge">Nejbližších 12 hodin</span>
+        <div class="weather-hours-scroll">${hourlyHtml}</div>
+      </article>
+      <article class="news-card">
+        <span class="news-badge">Výhled na 5 dní</span>
+        ${dailyHtml}
+      </article>
+    `;
+  }
+
   async function loadInfoFeed(force = false) {
+    if (infoCat === "pocasi") {
+      if (weatherCache && !force) {
+        renderWeatherView();
+        return;
+      }
+      infoFeed.innerHTML = "<p style='text-align:center;color:#7b8885;margin-top:30px'>Načítám předpověď počasí...</p>";
+      weatherCache = await fetchWeatherData();
+      renderWeatherView();
+      return;
+    }
+
     if (newsItems.length && !force) {
       renderInfoFeed();
       return;
     }
     infoFeed.innerHTML = "<p style='text-align:center;color:#7b8885;margin-top:30px'>Načítám aktuální zprávy...</p>";
-    const results = await Promise.all(RSS_SOURCES.map(fetchRssSource));
+    const [results, wData] = await Promise.all([
+      Promise.all(RSS_SOURCES.map(fetchRssSource)),
+      weatherCache ? Promise.resolve(weatherCache) : fetchWeatherData()
+    ]);
+    if (wData) weatherCache = wData;
     newsItems = results.flat().sort((a, b) => b.ts - a.ts);
     renderInfoFeed();
   }
 
   function renderInfoFeed() {
+    if (infoCat === "pocasi") {
+      loadInfoFeed(false);
+      return;
+    }
     const q = search.value.trim().toLocaleLowerCase("cs");
     const filtered = newsItems.filter(item => {
       if (infoCat !== "all" && item.cat !== infoCat) return false;
