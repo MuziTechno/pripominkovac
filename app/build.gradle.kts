@@ -11,8 +11,8 @@ android {
         applicationId = "cz.muzitechno.pripominkovac"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.2.0"
+        versionCode = 13
+        versionName = "0.2.1"
     }
 
     compileOptions {
