@@ -3,52 +3,101 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <link rel="stylesheet" href="styles.css">
   <title>Připomínkovač</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div id="app">
-    <header>
-      <input id="search" type="search" placeholder="Hledat v zápiscích…" aria-label="Hledat v zápiscích">
-      <nav>
-        <button type="button" data-view="all" class="active">Vše</button>
-        <button type="button" data-view="pinned">Připnuté</button>
-        <button type="button" data-view="trash">Koš</button>
-        <button type="button" id="settings" aria-label="Nastavení">⚙</button>
-      </nav>
-    </header>
-
-    <main id="feed"></main>
-
-    <footer>
-      <textarea id="draft" placeholder="Napiš nebo nadiktuj zápisek…" aria-label="Nový zápisek"></textarea>
-      <div>
-        <button type="button" id="alarm">⏰ Budík</button>
-        <button type="button" id="add">Přidat</button>
+<div id="app">
+  <header>
+    <input id="search" type="search" placeholder="Hledat v zápiscích...">
+    <nav id="subNavNotes">
+      <button type="button" data-view="all" class="active">Vše</button>
+      <button type="button" data-view="pinned">Připnuté</button>
+      <button type="button" data-view="trash">Koš</button>
+      <button type="button" id="settings" title="Nastavení">⚙</button>
+    </nav>
+    <nav id="subNavFeed" class="hidden">
+      <div class="chips-scroll">
+        <button type="button" data-cat="all" class="active">Vše</button>
+        <button type="button" data-cat="domov">Česko</button>
+        <button type="button" data-cat="svet">Svět</button>
+        <button type="button" data-cat="filmy">Filmy &amp; Stream</button>
+        <button type="button" data-cat="hry">GFN &amp; Hry</button>
+        <button type="button" data-cat="vesmir">Fyzika &amp; Vesmír</button>
       </div>
-    </footer>
-  </div>
+      <button type="button" id="refreshFeed" title="Obnovit zprávy">↻</button>
+    </nav>
+  </header>
 
-  <dialog id="alarmDialog">
-    <h2>Nastavit upomínku</h2>
-    <div id="quick"></div>
-    <label>
-      Vlastní datum a čas
-      <input id="datetime" type="datetime-local">
-    </label>
-    <menu>
-      <button type="button" id="cancelAlarm">Zrušit</button>
-      <button type="button" id="saveAlarm">Uložit</button>
-    </menu>
-  </dialog>
+  <main id="feed"></main>
 
-  <dialog id="menuDialog">
-    <h2>Možnosti zápisku</h2>
-    <div id="menuItems"></div>
+  <main id="infoFeed" class="hidden"></main>
+
+  <main id="aiPanel" class="hidden">
+    <div id="aiHistory">
+      <div class="ai-bubble system">
+        Ahoj! Zeptej se mě na cokoliv ze svých připomínek (např. <i>„Mám připomínku na STK?“</i>) nebo na aktuální dění, filmy, hry a vesmír.
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <textarea id="draft" placeholder="Napiš nebo nadiktuj zápisek..."></textarea>
+    <div class="bottom-bar">
+      <button type="button" id="alarm">⏰ Budík</button>
+
+      <div class="tab-switch">
+        <button type="button" data-tab="notes" class="tab-btn active" title="Připomínkovač">📝</button>
+        <button type="button" data-tab="info" class="tab-btn" title="InfoKanál">📰</button>
+        <button type="button" data-tab="ai" class="tab-btn" title="Chytrá Lupa (Gemini)">🔍</button>
+      </div>
+
+      <button type="button" id="add">Přidat</button>
+    </div>
+  </footer>
+</div>
+
+<dialog id="alarmDialog">
+  <h3>Nastavit upomínku</h3>
+  <div id="quick"></div>
+  <label>Vlastní datum a čas
+    <input id="datetime" type="datetime-local">
+  </label>
+  <label>Opakování
+    <select id="repeat">
+      <option value="none">Neopakovat</option>
+      <option value="daily">Denně</option>
+      <option value="weekly">Týdně</option>
+      <option value="monthly">Měsíčně</option>
+      <option value="yearly">Ročně</option>
+    </select>
+  </label>
+  <menu>
+    <button type="button" id="cancelAlarm">Zrušit</button>
+    <button type="button" id="saveAlarm">Uložit</button>
+  </menu>
+</dialog>
+
+<dialog id="menuDialog">
+  <h3>Možnosti zápisku</h3>
+  <div id="menuItems"></div>
+  <menu>
     <button type="button" id="closeMenu">Zavřít</button>
-  </dialog>
+  </menu>
+</dialog>
 
-  <!-- Klasický defer script. type=module se z file:// v Android WebView nenačetl. -->
-  <script defer src="app.js"></script>
+<dialog id="settingsDialog">
+  <h3>Nastavení aplikace</h3>
+  <label>Gemini API klíč (pro Lupu 🔍)
+    <input id="geminiKeyInput" type="password" placeholder="AIzaSy...">
+  </label>
+  <p class="hint">Klíč se ukládá pouze bezpečně v paměti tvého telefonu. Získáš ho zdarma v Google AI Studio.</p>
+  <menu>
+    <button type="button" id="closeSettings">Zrušit</button>
+    <button type="button" id="saveSettings">Uložit</button>
+  </menu>
+</dialog>
+
+<script src="app.js"></script>
 </body>
 </html>
