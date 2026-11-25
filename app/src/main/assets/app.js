@@ -191,21 +191,14 @@
     { cat: "hry", label: "GFN & Hry", url: "https://" + "games." + "tiscali." + "cz/rss" },
     { cat: "hry", label: "NVIDIA / GFN", url: "https://" + "nvidianews." + "nvidia." + "com/releases.xml" },
     { cat: "vesmir", label: "Vesmír", url: "https://" + "kosmonautix." + "cz/feed/" },
-    { cat: "vesmir", label: "Fyzika & Věda", url: "https://" + "www." + "osel." + "cz/rss.php" }
-  ];
-  $("#cancelAlarm").onclick = () => alarmDialog.close();
-  $("#alarm").onclick = () => openAlarm(null);
-  const RSS_SOURCES = [
-    { cat: "domov", label: "ČT24 Domov", url: "https://" + "ct24." + "ceskatelevize." + "cz/rss/tema/domaci-11220" },
-    { cat: "svet", label: "ČT24 Svět", url: "https://" + "ct24." + "ceskatelevize." + "cz/rss/tema/svet-11221" },
-    { cat: "filmy", label: "Filmy & Stream", url: "https://" + "www." + "totalfilm." + "cz/feed/" },
-    { cat: "hry", label: "GFN & Hry", url: "https://" + "games." + "tiscali." + "cz/rss" },
-    { cat: "hry", label: "NVIDIA / GFN", url: "https://" + "nvidianews." + "nvidia." + "com/releases.xml" },
-    { cat: "vesmir", label: "Vesmír", url: "https://" + "kosmonautix." + "cz/feed/" },
-    { cat: "vesmir", label: "Fyzika & Věda", url: "https://" + "www." + "osel." + "cz/rss.php" }
+        { cat: "vesmir", label: "Fyzika & Věda", url: "https://" + "www." + "osel." + "cz/rss.php" }
   ];
 
+  $("#cancelAlarm").onclick = () => alarmDialog.close();
+  $("#alarm").onclick = () => openAlarm(null);
+
   window.onNativeFetchResult = function(reqId, ok, body) {
+
     const cb = pendingFetches[reqId];
     if (cb) {
       delete pendingFetches[reqId];
