@@ -6,7 +6,7 @@
   const subNavNotes = $("#subNavNotes"), subNavFeed = $("#subNavFeed");
   const addBtn = $("#add"), alarmBtn = $("#alarm");
 
-  let view = "all";
+  let view = "prehled";
   let activeTab = "notes";
   let infoCat = "all";
   let alarmTarget = null;
@@ -162,7 +162,7 @@
     }).join("");
   }
 
-  feed.onclick = e => {
+    feed.onclick = e => {
     const btn = e.target.closest("button");
     if (!btn) return;
     const id = Number(btn.closest(".card").dataset.id);
@@ -179,6 +179,20 @@
     renderNotes();
   };
 
+  $("#cancelAlarm").onclick = () => alarmDialog.close();
+  $("#alarm").onclick = () => openAlarm(null);
+
+  const RSS_SOURCES = [
+    { cat: "domov", label: "ČT24 Domov", url: "https://" + "ct24." + "ceskatelevize." + "cz/rss/tema/domaci-11220" },
+    { cat: "svet", label: "ČT24 Svět", url: "https://" + "ct24." + "ceskatelevize." + "cz/rss/tema/svet-11221" },
+    { cat: "filmy", label: "Filmy & Kino", url: "https://" + "www." + "totalfilm." + "cz/feed/" },
+    { cat: "filmy", label: "Nové trailery", url: "https://" + "www." + "totalfilm." + "cz/kategorie/trailery/feed/" },
+    { cat: "filmy", label: "Streamy & VOD", url: "https://" + "filmtoro." + "cz/rss" },
+    { cat: "hry", label: "GFN & Hry", url: "https://" + "games." + "tiscali." + "cz/rss" },
+    { cat: "hry", label: "NVIDIA / GFN", url: "https://" + "nvidianews." + "nvidia." + "com/releases.xml" },
+    { cat: "vesmir", label: "Vesmír", url: "https://" + "kosmonautix." + "cz/feed/" },
+    { cat: "vesmir", label: "Fyzika & Věda", url: "https://" + "www." + "osel." + "cz/rss.php" }
+  ];
   $("#cancelAlarm").onclick = () => alarmDialog.close();
   $("#alarm").onclick = () => openAlarm(null);
   const RSS_SOURCES = [
@@ -324,6 +338,137 @@
     `;
   }
 
+    function getDaySlotKey() {
+    const now = new Date();
+    const h = now.getHours();
+    const slot = h < 11 ? "rano" : (h < 17 ? "odpoledne" : "vecer");
+    return "daily_digest_" + now.toISOString().slice(0, 10) + "_" + slot;
+  }
+
+  function formatDigestHtml(rawText, indexedItems) {
+    let safe = esc(rawText);
+    safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    safe = safe.replace(/\[(\d+)\]/g, (_, numStr) => {
+      const idx = Number(numStr) - 1;
+      const item = indexedItems[idx];
+      if (!item || !item.link) return "";
+      return ` <a href="#" class="digest-link" data-url="${esc(item.link)}">🔗 Číst</a>`;
+    });
+    return safe.replace(/\n/g, "<br>");
+  }
+
+  function showDigestCard(html, ts) {
+    infoFeed.innerHTML = `
+      <article class="news-card" style="line-height:1.55">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span class="news-badge">✨ Denní přehled · ${fmt(ts)}</span>
+          <button type="button" id="regenDigestBtn" style="font-size:12px;padding:4px 10px;border-radius:12px;border:1px solid #cddbd6;background:#f2f7f5;color:#1a2b25">↻ Nový souhrn</button>
+        </div>
+        <div class="digest-body" style="font-size:14px;color:#1a2b25">${html}</div>
+      </article>
+    `;
+    const regen = $("#regenDigestBtn");
+    if (regen) regen.onclick = () => renderDailyDigest(true);
+    infoFeed.querySelectorAll(".digest-link").forEach(a => {
+      a.onclick = e => {
+        e.preventDefault();
+        if (a.dataset.url) androidCall("openUrl", a.dataset.url);
+      };
+    });
+  }
+
+  function renderDailyDigest(force = false) {
+    const apiKey = (localStorage.getItem("gemini_api_key") || "").trim();
+    if (!apiKey) {
+      infoFeed.innerHTML = `<article class="news-card">
+        <span class="news-badge">✨ Denní přehled</span>
+        <p class="news-desc">Pro automatický souhrn počasí, zpráv z ČR, filmů, trailerů, her a vesmíru vlož nejprve svůj <strong>Gemini API klíč</strong> pod ikonkou <strong>⚙</strong>.</p>
+      </article>`;
+      return;
+    }
+
+    const slotKey = getDaySlotKey();
+    const cachedRaw = !force ? localStorage.getItem(slotKey) : null;
+    if (cachedRaw) {
+      try {
+        const cached = JSON.parse(cachedRaw);
+        showDigestCard(cached.html, cached.ts);
+        return;
+      } catch (_) {}
+    }
+
+    infoFeed.innerHTML = `<article class="news-card">
+      <span class="news-badge">✨ Denní přehled · AI</span>
+      <p style="color:#5a756c;margin:10px 0">Připravuji stručný souhrn dne (počasí, ČR, filmy, trailery, gamesy, vesmír)...</p>
+    </article>`;
+
+    const indexedItems = [];
+    ["domov", "filmy", "hry", "vesmir"].forEach(cat => {
+      const limit = cat === "filmy" ? 8 : 5;
+      newsItems.filter(x => x.cat === cat).slice(0, limit).forEach(item => {
+        indexedItems.push(item);
+      });
+    });
+
+    const articlesList = indexedItems.map((it, i) =>
+      `[${i + 1}] (${it.cat} / ${it.source}) ${it.title}${it.desc ? " – " + it.desc : ""}`
+    ).join("\n");
+
+    let weatherCtx = "Počasí se nepodařilo načíst.";
+    if (weatherCache?.current && weatherCache?.daily) {
+      const c = weatherCache.current;
+      const d = weatherCache.daily;
+      weatherCtx = `Praha 9 právě teď: ${Math.round(c.temperature_2m)} °C (pocitově ${Math.round(c.apparent_temperature)} °C), ${wmoToCzech(c.weather_code).text}. ` +
+        `Dnes max ${Math.round(d.temperature_2m_max.at(0))} °C / min ${Math.round(d.temperature_2m_min.at(0))} °C, šance srážek ${d.precipitation_probability_max?.at(0) ?? 0}%. ` +
+        `Zítra ${wmoToCzech(d.weather_code.at(1)).text}, ${Math.round(d.temperature_2m_min.at(1))} až ${Math.round(d.temperature_2m_max.at(1))} °C.`;
+    }
+
+    const prompt =
+      "Vytvoř stručný, čtivý a přehledný denní souhrn v češtině pro uživatele z Prahy 9. Dnes je " + fmt(Date.now()) + ".\n" +
+      "Rozděl odpověď přesně do těchto 5 krátkých sekcí s emoji:\n" +
+      "🌤 **Počasí**\n" +
+      "🇨🇿 **Důležité z ČR**\n" +
+      "🎬 **Nové filmy, trailery a streamy**\n" +
+      "🎮 **Gamesy**\n" +
+      "🚀 **Zajímavost z fyziky / vesmíru**\n\n" +
+      "Pravidla:\n" +
+      "- Každá sekce maximálně 2 až 3 stručné věty nebo odrážky.\n" +
+      "- Kdykoliv zmiňuješ konkrétní zprávu, film, trailer, hru nebo objev ze seznamu níže, napiš na konec věty jeho číslo v hranaté závorce, např. [1] (vždy jen jedno číslo v jedné závorce).\n" +
+      "- Nevymýšlej si informace, které nejsou v podkladech.\n\n" +
+      "PODKLADY POČASÍ:\n" + weatherCtx + "\n\n" +
+      "PODKLADY ČLÁNKŮ:\n" + articlesList;
+
+    const payload = JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] });
+    const reqId = "dig_" + Math.random().toString(36).slice(2);
+
+    pendingGemini[reqId] = (ok, respBody) => {
+      if (!ok) {
+        infoFeed.innerHTML = `<article class="news-card">
+          <span class="news-badge">✨ Denní přehled</span>
+          <p class="news-desc">Nepodařilo se vygenerovat přehled. Zkus klepnout na ↻ nahoře.</p>
+        </article>`;
+        return;
+      }
+      try {
+        const data = JSON.parse(respBody);
+        const parts = data?.candidates?.at(0)?.content?.parts;
+        const text = Array.isArray(parts) ? parts.map(p => p.text || "").join("").trim() : "";
+        if (!text) throw new Error("empty");
+        const html = formatDigestHtml(text, indexedItems);
+        const ts = Date.now();
+        localStorage.setItem(slotKey, JSON.stringify({ html, ts }));
+        showDigestCard(html, ts);
+      } catch (_) {
+        infoFeed.innerHTML = `<article class="news-card">
+          <span class="news-badge">✨ Denní přehled</span>
+          <p class="news-desc">Chyba při zpracování souhrnu. Zkus obnovit (↻).</p>
+        </article>`;
+      }
+    };
+
+    androidCall("askGemini", reqId, apiKey, payload);
+  }
+
   async function loadInfoFeed(force = false) {
     if (infoCat === "pocasi") {
       if (weatherCache && !force) {
@@ -337,7 +482,8 @@
     }
 
     if (newsItems.length && !force) {
-      renderInfoFeed();
+      if (infoCat === "prehled") renderDailyDigest(false);
+      else renderInfoFeed();
       return;
     }
     infoFeed.innerHTML = "<p style='text-align:center;color:#7b8885;margin-top:30px'>Načítám aktuální zprávy...</p>";
@@ -347,15 +493,21 @@
     ]);
     if (wData) weatherCache = wData;
     newsItems = results.flat().sort((a, b) => b.ts - a.ts);
-    renderInfoFeed();
+    if (infoCat === "prehled") renderDailyDigest(force);
+    else renderInfoFeed();
   }
+
   function renderInfoFeed() {
     if (infoCat === "pocasi") {
       loadInfoFeed(false);
       return;
     }
+    if (infoCat === "prehled") {
+      if (!newsItems.length || !weatherCache) loadInfoFeed(false);
+      else renderDailyDigest(false);
+      return;
+    }
     const q = search.value.trim().toLocaleLowerCase("cs");
-    const filtered = newsItems.filter(item => {
       if (infoCat !== "all" && item.cat !== infoCat) return false;
       return !q || item.title.toLocaleLowerCase("cs").includes(q) || item.desc.toLocaleLowerCase("cs").includes(q);
     });
@@ -364,7 +516,6 @@
       infoFeed.innerHTML = "<p style='text-align:center;color:#7b8885;margin-top:30px'>Žádné zprávy k zobrazení. Zkus obnovit (↻).</p>";
       return;
     }
-
     infoFeed.innerHTML = filtered.map((item, idx) => `
       <article class="news-card" data-idx="${idx}">
         <span class="news-badge">${esc(item.source)} · ${fmt(item.ts)}</span>
