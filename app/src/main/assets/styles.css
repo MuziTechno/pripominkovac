@@ -341,3 +341,14 @@ menu {
 .weather-day-row:last-child {
   border-bottom: none;
 }
+.digest-link {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #314c44;
+  background: #e7f0ec;
+  padding: 1px 7px;
+  border-radius: 10px;
+  text-decoration: none;
+  margin-left: 3px;
+}
