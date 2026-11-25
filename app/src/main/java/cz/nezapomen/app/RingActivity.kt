@@ -3,6 +3,8 @@ package cz.nezapomen.app
 import android.app.NotificationManager
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.RingtoneManager
@@ -28,6 +30,7 @@ import java.time.LocalTime
 import java.time.Year
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 class RingActivity : AppCompatActivity() {
@@ -87,29 +90,65 @@ class RingActivity : AppCompatActivity() {
         tts?.speak(msg, TextToSpeech.QUEUE_FLUSH, null, "alarm_tts")
     }
 
+    private fun roundedBg(fillColor: Int, radiusDp: Float): GradientDrawable {
+        val density = resources.displayMetrics.density
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = radiusDp * density
+            setColor(fillColor)
+        }
+    }
+
     private fun createAlarmScreen(): LinearLayout {
+        val darkGreen = Color.rgb(26, 43, 37)
+        val primarySage = Color.rgb(49, 76, 68)
+        val pillSage = Color.rgb(210, 226, 220)
+        val density = resources.displayMetrics.density
+        val padSide = (24 * density).toInt()
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(24, 40, 24, 40)
+            setPadding(padSide, (40 * density).toInt(), padSide, (40 * density).toInt())
             setBackgroundColor(Color.rgb(231, 240, 236))
         }
 
+        val timeStr = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+        root.addView(TextView(this).apply {
+            text = timeStr
+            textSize = 54f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(darkGreen)
+            gravity = Gravity.CENTER
+        })
+
         root.addView(TextView(this).apply {
             text = "⏰"
-            textSize = 56f
+            textSize = 44f
             gravity = Gravity.CENTER
+            setPadding(0, (8 * density).toInt(), 0, (12 * density).toInt())
         })
 
         root.addView(TextView(this).apply {
             text = alarmText
-            textSize = 26f
+            textSize = 24f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(darkGreen)
             gravity = Gravity.CENTER
-            setPadding(0, 20, 0, 24)
+            setPadding(0, 0, 0, (32 * density).toInt())
         })
 
         root.addView(Button(this).apply {
-            text = "Vypnout"
+            text = "VYPNOUT"
+            textSize = 17f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            background = roundedBg(primarySage, 28f)
+            stateListAnimator = null
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (56 * density).toInt()
+            )
             setOnClickListener {
                 if (repeatRule == "none") {
                     recordAlarmUpdate(alarmId, 0L, 0L, true)
@@ -130,10 +169,12 @@ class RingActivity : AppCompatActivity() {
         })
 
         root.addView(TextView(this).apply {
-            text = "Odložit"
-            textSize = 18f
+            text = "Odložit o:"
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(primarySage)
             gravity = Gravity.CENTER
-            setPadding(0, 20, 0, 6)
+            setPadding(0, (28 * density).toInt(), 0, (12 * density).toInt())
         })
 
         val snoozeRow = LinearLayout(this).apply {
@@ -144,6 +185,18 @@ class RingActivity : AppCompatActivity() {
         listOf(5, 10, 30, 60, 120, 180).forEach { minutes ->
             snoozeRow.addView(Button(this).apply {
                 text = if (minutes < 60) "$minutes min" else "${minutes / 60} h"
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(darkGreen)
+                background = roundedBg(pillSage, 20f)
+                stateListAnimator = null
+                setPadding((16 * density).toInt(), 0, (16 * density).toInt(), 0)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (44 * density).toInt()
+                ).apply {
+                    setMargins((5 * density).toInt(), 0, (5 * density).toInt(), 0)
+                }
                 setOnClickListener {
                     val snoozeAt = System.currentTimeMillis() + minutes.toLong() * 60_000L
                     AlarmScheduler.schedule(
