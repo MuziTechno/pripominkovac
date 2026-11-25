@@ -1,187 +1,192 @@
-(() => {
+(function() {
+  "use strict";
   const $ = s => document.querySelector(s);
-  const feed = $("#feed"), infoFeed = $("#infoFeed"), aiPanel = $("#aiPanel");
-  const draft = $("#draft"), search = $("#search");
-  const alarmDialog = $("#alarmDialog"), settingsDialog = $("#settingsDialog"), apiKeyInput = $("#apiKeyInput");
-  const subNavNotes = $("#subNavNotes"), subNavFeed = $("#subNavFeed");
-  const addBtn = $("#add"), alarmBtn = $("#alarm");
+  const feed = $("#feed");
+  const infoFeed = $("#infoFeed");
+  const aiPanel = $("#aiPanel");
+  const aiHistory = $("#aiHistory");
+  const draft = $("#draft");
+  const search = $("#search");
+  const alarmDialog = $("#alarmDialog");
+  const menuDialog = $("#menuDialog");
+  const settingsDialog = $("#settingsDialog");
+  const repeatSelect = $("#repeat");
 
-  let view = "prehled";
-  let activeTab = "notes";
-  let infoCat = "all";
-  let alarmTarget = null;
   let notes = [];
+  try {
+    notes = JSON.parse(localStorage.getItem("notes") || "[]");
+    if (!Array.isArray(notes)) notes = [];
+  } catch (_) {
+    notes = [];
+  }
+  notes = notes.map(n => ({
+    ...n,
+    repeat: n.repeat || "none",
+    baseAt: n.baseAt || n.alarm || null
+  }));
+
+  let activeTab = "notes";
+  let view = "all";
+  let infoCat = "prehled";
+  let draftAlarm = null;
+  let draftRepeat = "none";
+  let target = null;
   let newsItems = [];
   let weatherCache = null;
-
   const pendingFetches = {};
   const pendingGemini = {};
 
   function androidCall(method, ...args) {
-    try {
-      if (window.Android && typeof window.Android[method] === "function") {
-        return window.Android[method](...args);
-      }
-    } catch (_) {}
+    if (window.Android && typeof window.Android[method] === "function") {
+      return window.Android[method](...args);
+    }
     return null;
   }
 
-  function loadNotes() {
+  window.applyAlarmUpdates = function(updatesJson) {
     try {
-      notes = JSON.parse(localStorage.getItem("notes_v1") || "[]");
-    } catch (_) {
-      notes = [];
-    }
-    try {
-      const updatesRaw = androidCall("consumeAlarmUpdates");
-      if (updatesRaw) {
-        const updates = JSON.parse(updatesRaw);
-        let changed = false;
-        updates.forEach(u => {
-          const n = notes.find(x => String(x.id) === String(u.id));
-          if (n) {
-            if (u.dismissed) {
-              n.alarm = null;
-            } else if (u.at > 0) {
-              n.alarm = u.at;
-              if (u.baseAt > 0) n.baseAt = u.baseAt;
-            }
-            changed = true;
+      const updates = JSON.parse(updatesJson);
+      if (!Array.isArray(updates) || !updates.length) return;
+      let changed = false;
+      updates.forEach(u => {
+        const note = notes.find(n => String(n.id) === String(u.id));
+        if (note) {
+          if (u.dismissed) {
+            note.alarm = null;
+            note.baseAt = null;
+          } else if (u.at > 0) {
+            note.alarm = u.at;
+            note.baseAt = u.baseAt || u.at;
           }
-        });
-        if (changed) saveNotes();
-      }
-    } catch (_) {}
-  }
-
-  function saveNotes() {
-    localStorage.setItem("notes_v1", JSON.stringify(notes));
-  }
-
-  function esc(s) {
-    return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  }
-
-  function fmt(ts) {
-    return new Date(ts).toLocaleString("cs-CZ", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
-  }
-
-  function setAlarm(at, prefillText = null) {
-    const repeat = $("#repeat").value || "none";
-    if (alarmTarget) {
-      const n = notes.find(x => x.id === alarmTarget);
-      if (n) {
-        n.alarm = at;
-        n.baseAt = at;
-        n.repeat = repeat;
-        saveNotes();
-        androidCall("scheduleAlarm", String(n.id), n.text.slice(0, 80), at, repeat, at);
-      }
-    } else {
-      const text = (prefillText || draft.value).trim();
-      if (!text) return;
-      const id = Date.now();
-      notes.push({ id, text, created: id, alarm: at, baseAt: at, repeat, pinned: false, deleted: false });
-      saveNotes();
-      androidCall("scheduleAlarm", String(id), text.slice(0, 80), at, repeat, at);
-      if (!prefillText) draft.value = "";
-    }
-    alarmDialog.close();
-    renderNotes();
-  }
-
-  function openAlarm(id, prefillText = null) {
-    alarmTarget = id;
-    const d = new Date(Date.now() + 3600_000);
-    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-    $("#datetime").value = d.toISOString().slice(0, 16);
-    $("#repeat").value = "none";
-
-    const quick = $("#quick");
-    quick.innerHTML = "";
-    [["Za 15 min", 15], ["Za 1 hodinu", 60], ["Za 3 hodiny", 180], ["Zítra ráno", "tomorrow"]].forEach(([lbl, val]) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = lbl;
-      b.onclick = () => {
-        if (val === "tomorrow") {
-          const t = new Date();
-          t.setDate(t.getDate() + 1);
-          t.setHours(8, 0, 0, 0);
-          setAlarm(t.getTime(), prefillText);
-        } else {
-          setAlarm(Date.now() + val * 60_000, prefillText);
+          changed = true;
         }
-      };
-      quick.appendChild(b);
-    });
+      });
+      if (changed) {
+        save();
+        render(false);
+      }
+      androidCall("clearAlarmUpdates");
+    } catch (_) {}
+  };
 
-    $("#saveAlarm").onclick = () => {
-      const at = new Date($("#datetime").value).getTime();
-      if (at > Date.now()) setAlarm(at, prefillText);
-      else alert("Vyber budoucí datum a čas.");
-    };
+  function repeatLabel(r) {
+    return ({ daily: "denně", weekly: "týdně", monthly: "měsíčně", yearly: "ročně" })[r] || "";
+  }
+
+  function syncAlarms() {
+    const arr = notes
+      .filter(n => !n.deleted && n.alarm && n.alarm > Date.now())
+      .map(n => ({
+        id: String(n.id),
+        text: n.text,
+        at: n.alarm,
+        baseAt: n.baseAt || n.alarm,
+        repeat: n.repeat || "none"
+      }));
+    androidCall("saveAlarmIndex", JSON.stringify(arr));
+  }
+
+  function save() {
+    localStorage.setItem("notes", JSON.stringify(notes));
+    syncAlarms();
+  }
+
+  function esc(v) {
+    return String(v).replace(/[&<>"']/g, c => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[c]);
+  }
+
+  function fmt(t) {
+    return new Date(t).toLocaleString("cs-CZ", {
+      day: "numeric",
+      month: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
+  function render(bottom) {
+    const q = search.value.trim().toLocaleLowerCase("cs");
+    const now = Date.now();
+    const list = notes.filter(n => {
+      if (view === "trash" ? !n.deleted : n.deleted) return false;
+      if (view === "pinned" && !n.pinned) return false;
+      return !q || n.text.toLocaleLowerCase("cs").includes(q);
+    });
+    feed.innerHTML = list.length ? list.map(n => {
+      const overdue = n.alarm && n.alarm < now;
+      const rep = repeatLabel(n.repeat);
+      return `<article class="note" data-id="${n.id}">
+        <div class="top">
+          <div class="text">${esc(n.text)}</div>
+          <div class="tools">
+            <button type="button" data-action="share">↗</button>
+            <button type="button" data-action="menu">⋮</button>
+          </div>
+        </div>
+        ${n.alarm ? `<button type="button" data-action="alarm" class="alarm ${overdue ? "overdue" : ""}">
+          <span class="alarm-icon">${overdue ? "⚠" : "⏰"}</span>
+          <span class="alarm-text">${overdue ? "Po termínu: " : ""}${fmt(n.alarm)}${rep ? ` · ${rep}` : ""}</span>
+        </button>` : ""}
+        <div class="meta"><span>${fmt(n.created)}</span><span>${n.pinned ? "📌 Připnuto" : ""}</span></div>
+      </article>`;
+    }).join("") : "<p style='text-align:center;color:#7b8885;margin-top:30px'>Žádné zápisky.</p>";
+    if (bottom) feed.scrollTop = feed.scrollHeight;
+  }
+
+  function nativeSchedule(n) {
+    const result = androidCall("scheduleAlarm", String(n.id), n.text, n.alarm, n.repeat || "none", n.baseAt || n.alarm);
+    if (result === "exact_alarm_permission_required") {
+      androidCall("openAlarmPermissions");
+      alert("Povol aplikaci Budíky a připomenutí a potom termín nastav znovu.");
+    }
+    return result;
+  }
+
+  function openAlarm(n) {
+    target = n || null;
+    const a = target?.alarm || draftAlarm;
+    $("#datetime").value = a ? new Date(a - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
+    repeatSelect.value = target?.repeat || draftRepeat || "none";
     alarmDialog.showModal();
   }
 
-  function renderNotes() {
-    const q = search.value.trim().toLocaleLowerCase("cs");
-    const list = notes
-      .filter(n => {
-        if (view === "trash") return n.deleted;
-        if (n.deleted) return false;
-        if (view === "pinned") return n.pinned;
-        return true;
-      })
-      .filter(n => !q || n.text.toLocaleLowerCase("cs").includes(q))
-      .sort((a, b) => (b.pinned - a.pinned) || (b.created - a.created));
-
-    if (!list.length) {
-      feed.innerHTML = `<p style="text-align:center;color:#7b8885;margin-top:40px">Žádné zápisky.</p>`;
-      return;
+  function setAlarm(at) {
+    const rep = repeatSelect.value || "none";
+    if (target) {
+      target.alarm = at;
+      target.baseAt = at;
+      target.repeat = rep;
+      nativeSchedule(target);
+    } else {
+      draftAlarm = at;
+      draftRepeat = rep;
     }
-
-    feed.innerHTML = list.map(n => {
-      const overdue = n.alarm && n.alarm < Date.now();
-      return `
-        <article class="card ${n.pinned ? "pinned" : ""}" data-id="${n.id}">
-          <div class="meta">
-            <span>${fmt(n.created)}</span>
-            ${n.alarm ? `<span class="badge ${overdue ? "overdue" : ""}">⏰ ${fmt(n.alarm)}</span>` : ""}
-          </div>
-          <p class="body">${esc(n.text)}</p>
-          <div class="actions">
-            ${view === "trash"
-              ? `<button type="button" data-act="restore">Obnovit</button><button type="button" data-act="purge">Smazat navždy</button>`
-              : `<button type="button" data-act="pin">${n.pinned ? "Odepnout" : "Připnout"}</button>
-                 <button type="button" data-act="alarm">⏰ Budík</button>
-                 ${n.alarm ? `<button type="button" data-act="cancelAlarm">Zrušit budík</button>` : ""}
-                 <button type="button" data-act="del">Smazat</button>`}
-          </div>
-        </article>`;
-    }).join("");
+    save();
+    alarmDialog.close();
+    render(false);
   }
 
-    feed.onclick = e => {
-    const btn = e.target.closest("button");
-    if (!btn) return;
-    const id = Number(btn.closest(".card").dataset.id);
-    const n = notes.find(x => x.id === id);
-    if (!n) return;
-    const act = btn.dataset.act;
-    if (act === "pin") n.pinned = !n.pinned;
-    else if (act === "del") { n.deleted = true; if (n.alarm) { androidCall("cancelAlarm", String(n.id)); n.alarm = null; } }
-    else if (act === "restore") n.deleted = false;
-    else if (act === "purge") notes = notes.filter(x => x.id !== id);
-    else if (act === "alarm") return openAlarm(id);
-    else if (act === "cancelAlarm") { androidCall("cancelAlarm", String(n.id)); n.alarm = null; }
-    saveNotes();
-    renderNotes();
-  };
+  [[5, "5 minut"], [10, "10 minut"], [30, "30 minut"], [60, "1 hodina"], [120, "2 hodiny"], [180, "3 hodiny"]].forEach(([m, t]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = t;
+    b.onclick = () => setAlarm(Date.now() + m * 60000);
+    $("#quick").append(b);
+  });
 
+  $("#saveAlarm").onclick = () => {
+    const at = new Date($("#datetime").value).getTime();
+    if (at > Date.now()) setAlarm(at);
+    else alert("Vyber budoucí datum a čas.");
+  };
   $("#cancelAlarm").onclick = () => alarmDialog.close();
   $("#alarm").onclick = () => openAlarm(null);
-
   const RSS_SOURCES = [
     { cat: "domov", label: "ČT24 Domov", url: "https://" + "ct24." + "ceskatelevize." + "cz/rss/tema/domaci-11220" },
     { cat: "svet", label: "ČT24 Svět", url: "https://" + "ct24." + "ceskatelevize." + "cz/rss/tema/svet-11221" },
@@ -191,14 +196,10 @@
     { cat: "hry", label: "GFN & Hry", url: "https://" + "games." + "tiscali." + "cz/rss" },
     { cat: "hry", label: "NVIDIA / GFN", url: "https://" + "nvidianews." + "nvidia." + "com/releases.xml" },
     { cat: "vesmir", label: "Vesmír", url: "https://" + "kosmonautix." + "cz/feed/" },
-        { cat: "vesmir", label: "Fyzika & Věda", url: "https://" + "www." + "osel." + "cz/rss.php" }
+    { cat: "vesmir", label: "Fyzika & Věda", url: "https://" + "www." + "osel." + "cz/rss.php" }
   ];
 
-  $("#cancelAlarm").onclick = () => alarmDialog.close();
-  $("#alarm").onclick = () => openAlarm(null);
-
   window.onNativeFetchResult = function(reqId, ok, body) {
-
     const cb = pendingFetches[reqId];
     if (cb) {
       delete pendingFetches[reqId];
@@ -281,12 +282,7 @@
       const temp = Math.round(weatherCache.hourly.temperature_2m[idx]);
       const pop = weatherCache.hourly.precipitation_probability?.[idx] ?? 0;
       const hSt = wmoToCzech(weatherCache.hourly.weather_code[idx]);
-      return `<div class="weather-hour">
-        <span>${hr}</span>
-        <span style="font-size:18px;margin:4px 0">${hSt.icon}</span>
-        <strong>${temp}°</strong>
-        <span style="font-size:11px;color:#5a756c">${pop > 0 ? "💧" + pop + "%" : ""}</span>
-      </div>`;
+      return "<div class='weather-hour'><span>" + hr + "</span><span style='font-size:18px;margin:4px 0'>" + hSt.icon + "</span><strong>" + temp + "°</strong><span style='font-size:11px;color:#5a756c'>" + (pop > 0 ? "💧" + pop + "%" : "") + "</span></div>";
     }).join("");
 
     const daysCz = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
@@ -297,41 +293,23 @@
       const tMin = Math.round(weatherCache.daily.temperature_2m_min[i]);
       const tMax = Math.round(weatherCache.daily.temperature_2m_max[i]);
       const pop = weatherCache.daily.precipitation_probability_max?.[i] ?? 0;
-      return `<div class="weather-day-row">
-        <span style="width:85px;font-weight:600">${dayName}</span>
-        <span>${dSt.icon} ${dSt.text}</span>
-        <span style="font-size:12px;color:#5a756c">${pop > 10 ? "💧" + pop + "%" : ""}</span>
-        <strong>${tMin}° / ${tMax}°</strong>
-      </div>`;
+      return "<div class='weather-day-row'><span style='width:85px;font-weight:600'>" + dayName + "</span><span>" + dSt.icon + " " + dSt.text + "</span><span style='font-size:12px;color:#5a756c'>" + (pop > 10 ? "💧" + pop + "%" : "") + "</span><strong>" + tMin + "° / " + tMax + "°</strong></div>";
     }).join("");
 
-    infoFeed.innerHTML = `
-      <article class="news-card" style="background:linear-gradient(135deg,#e7f0ec,#f7faf8)">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <span class="news-badge">Praha 9 · Právě teď</span>
-            <div style="font-size:42px;font-weight:700;color:#1a2b25;line-height:1.1">${Math.round(c.temperature_2m)} °C</div>
-            <div style="color:#314c44;font-weight:600;margin-top:4px">${st.text} · Pocitově ${Math.round(c.apparent_temperature)} °C</div>
-          </div>
-          <div style="font-size:56px">${st.icon}</div>
-        </div>
-        <div style="display:flex;gap:16px;margin-top:12px;padding-top:10px;border-top:1px solid #d5e2dd;font-size:13px;color:#314c44">
-          <span>💨 Vítr: ${Math.round(c.wind_speed_10m)} km/h</span>
-          <span>💧 Vlhkost: ${c.relative_humidity_2m} %</span>
-        </div>
-      </article>
-      <article class="news-card">
-        <span class="news-badge">Nejbližších 12 hodin</span>
-        <div class="weather-hours-scroll">${hourlyHtml}</div>
-      </article>
-      <article class="news-card">
-        <span class="news-badge">Výhled na 5 dní</span>
-        ${dailyHtml}
-      </article>
-    `;
+    infoFeed.innerHTML =
+      "<article class='news-card' style='background:linear-gradient(135deg,#e7f0ec,#f7faf8)'>" +
+      "<div style='display:flex;justify-content:space-between;align-items:center'><div>" +
+      "<span class='news-badge'>Praha 9 · Právě teď</span>" +
+      "<div style='font-size:42px;font-weight:700;color:#1a2b25;line-height:1.1'>" + Math.round(c.temperature_2m) + " °C</div>" +
+      "<div style='color:#314c44;font-weight:600;margin-top:4px'>" + st.text + " · Pocitově " + Math.round(c.apparent_temperature) + " °C</div>" +
+      "</div><div style='font-size:56px'>" + st.icon + "</div></div>" +
+      "<div style='display:flex;gap:16px;margin-top:12px;padding-top:10px;border-top:1px solid #d5e2dd;font-size:13px;color:#314c44'>" +
+      "<span>💨 Vítr: " + Math.round(c.wind_speed_10m) + " km/h</span><span>💧 Vlhkost: " + c.relative_humidity_2m + " %</span>" +
+      "</div></article>" +
+      "<article class='news-card'><span class='news-badge'>Nejbližších 12 hodin</span><div class='weather-hours-scroll'>" + hourlyHtml + "</div></article>" +
+      "<article class='news-card'><span class='news-badge'>Výhled na 5 dní</span>" + dailyHtml + "</article>";
   }
-
-    function getDaySlotKey() {
+  function getDaySlotKey() {
     const now = new Date();
     const h = now.getHours();
     const slot = h < 11 ? "rano" : (h < 17 ? "odpoledne" : "vecer");
@@ -345,21 +323,19 @@
       const idx = Number(numStr) - 1;
       const item = indexedItems[idx];
       if (!item || !item.link) return "";
-      return ` <a href="#" class="digest-link" data-url="${esc(item.link)}">🔗 Číst</a>`;
+      return " <a href='#' class='digest-link' data-url='" + esc(item.link) + "'>🔗 Číst</a>";
     });
     return safe.replace(/\n/g, "<br>");
   }
 
   function showDigestCard(html, ts) {
-    infoFeed.innerHTML = `
-      <article class="news-card" style="line-height:1.55">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <span class="news-badge">✨ Denní přehled · ${fmt(ts)}</span>
-          <button type="button" id="regenDigestBtn" style="font-size:12px;padding:4px 10px;border-radius:12px;border:1px solid #cddbd6;background:#f2f7f5;color:#1a2b25">↻ Nový souhrn</button>
-        </div>
-        <div class="digest-body" style="font-size:14px;color:#1a2b25">${html}</div>
-      </article>
-    `;
+    infoFeed.innerHTML =
+      "<article class='news-card' style='line-height:1.55'>" +
+      "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
+      "<span class='news-badge'>✨ Denní přehled · " + fmt(ts) + "</span>" +
+      "<button type='button' id='regenDigestBtn' style='font-size:12px;padding:4px 10px;border-radius:12px;border:1px solid #cddbd6;background:#f2f7f5;color:#1a2b25'>↻ Nový souhrn</button>" +
+      "</div><div class='digest-body' style='font-size:14px;color:#1a2b25'>" + html + "</div></article>";
+
     const regen = $("#regenDigestBtn");
     if (regen) regen.onclick = () => renderDailyDigest(true);
     infoFeed.querySelectorAll(".digest-link").forEach(a => {
@@ -373,10 +349,7 @@
   function renderDailyDigest(force = false) {
     const apiKey = (localStorage.getItem("gemini_api_key") || "").trim();
     if (!apiKey) {
-      infoFeed.innerHTML = `<article class="news-card">
-        <span class="news-badge">✨ Denní přehled</span>
-        <p class="news-desc">Pro automatický souhrn počasí, zpráv z ČR, filmů, trailerů, her a vesmíru vlož nejprve svůj <strong>Gemini API klíč</strong> pod ikonkou <strong>⚙</strong>.</p>
-      </article>`;
+      infoFeed.innerHTML = "<article class='news-card'><span class='news-badge'>✨ Denní přehled</span><p class='news-desc'>Pro automatický souhrn vlož nejprve svůj <strong>Gemini API klíč</strong> pod ikonkou <strong>⚙</strong>.</p></article>";
       return;
     }
 
@@ -390,56 +363,48 @@
       } catch (_) {}
     }
 
-    infoFeed.innerHTML = `<article class="news-card">
-      <span class="news-badge">✨ Denní přehled · AI</span>
-      <p style="color:#5a756c;margin:10px 0">Připravuji stručný souhrn dne (počasí, ČR, filmy, trailery, gamesy, vesmír)...</p>
-    </article>`;
+    infoFeed.innerHTML = "<article class='news-card'><span class='news-badge'>✨ Denní přehled · AI</span><p style='color:#5a756c;margin:10px 0'>Připravuji stručný souhrn dne (počasí, ČR, filmy, trailery, gamesy, vesmír)...</p></article>";
 
     const indexedItems = [];
     ["domov", "filmy", "hry", "vesmir"].forEach(cat => {
-      const limit = cat === "filmy" ? 8 : 5;
+      const limit = cat === "filmy" ? 6 : 4;
       newsItems.filter(x => x.cat === cat).slice(0, limit).forEach(item => {
         indexedItems.push(item);
       });
     });
 
     const articlesList = indexedItems.map((it, i) =>
-      `[${i + 1}] (${it.cat} / ${it.source}) ${it.title}${it.desc ? " – " + it.desc : ""}`
+      "[" + (i + 1) + "] (" + it.source + ") " + it.title
     ).join("\n");
 
     let weatherCtx = "Počasí se nepodařilo načíst.";
     if (weatherCache?.current && weatherCache?.daily) {
       const c = weatherCache.current;
       const d = weatherCache.daily;
-      weatherCtx = `Praha 9 právě teď: ${Math.round(c.temperature_2m)} °C (pocitově ${Math.round(c.apparent_temperature)} °C), ${wmoToCzech(c.weather_code).text}. ` +
-        `Dnes max ${Math.round(d.temperature_2m_max.at(0))} °C / min ${Math.round(d.temperature_2m_min.at(0))} °C, šance srážek ${d.precipitation_probability_max?.at(0) ?? 0}%. ` +
-        `Zítra ${wmoToCzech(d.weather_code.at(1)).text}, ${Math.round(d.temperature_2m_min.at(1))} až ${Math.round(d.temperature_2m_max.at(1))} °C.`;
+      weatherCtx = "Praha 9 právě teď: " + Math.round(c.temperature_2m) + " °C (pocitově " + Math.round(c.apparent_temperature) + " °C), " + wmoToCzech(c.weather_code).text + ". " +
+        "Dnes max " + Math.round(d.temperature_2m_max.at(0)) + " °C / min " + Math.round(d.temperature_2m_min.at(0)) + " °C, srážky " + (d.precipitation_probability_max?.at(0) ?? 0) + "%. " +
+        "Zítra " + wmoToCzech(d.weather_code.at(1)).text + ", " + Math.round(d.temperature_2m_min.at(1)) + " až " + Math.round(d.temperature_2m_max.at(1)) + " °C.";
     }
 
     const prompt =
-      "Vytvoř stručný, čtivý a přehledný denní souhrn v češtině pro uživatele z Prahy 9. Dnes je " + fmt(Date.now()) + ".\n" +
-      "Rozděl odpověď přesně do těchto 5 krátkých sekcí s emoji:\n" +
+      "Vytvoř stručný denní souhrn v češtině pro Prahu 9 (" + fmt(Date.now()) + ") přesně v těchto 5 sekcích:\n" +
       "🌤 **Počasí**\n" +
       "🇨🇿 **Důležité z ČR**\n" +
       "🎬 **Nové filmy, trailery a streamy**\n" +
       "🎮 **Gamesy**\n" +
       "🚀 **Zajímavost z fyziky / vesmíru**\n\n" +
-      "Pravidla:\n" +
-      "- Každá sekce maximálně 2 až 3 stručné věty nebo odrážky.\n" +
-      "- Kdykoliv zmiňuješ konkrétní zprávu, film, trailer, hru nebo objev ze seznamu níže, napiš na konec věty jeho číslo v hranaté závorce, např. [1] (vždy jen jedno číslo v jedné závorce).\n" +
-      "- Nevymýšlej si informace, které nejsou v podkladech.\n\n" +
-      "PODKLADY POČASÍ:\n" + weatherCtx + "\n\n" +
-      "PODKLADY ČLÁNKŮ:\n" + articlesList;
+      "Pravidla: Každou sekci napiš ve 2 krátkých odrážkách. Když zmiňuješ položku ze seznamu, napiš za větu její číslo v hranaté závorce např. [1].\n\n" +
+      "POČASÍ:\n" + weatherCtx + "\n\n" +
+      "TITULKY:\n" + articlesList;
 
     const payload = JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] });
     const reqId = "dig_" + Math.random().toString(36).slice(2);
 
     pendingGemini[reqId] = (ok, respBody) => {
       if (!ok) {
-        infoFeed.innerHTML = `<article class="news-card">
-          <span class="news-badge">✨ Denní přehled</span>
-          <p class="news-desc">Nepodařilo se vygenerovat přehled. Zkus klepnout na ↻ nahoře.</p>
-        </article>`;
+        let errDetail = respBody;
+        try { errDetail = JSON.parse(respBody)?.error?.message || respBody; } catch (_) {}
+        infoFeed.innerHTML = "<article class='news-card'><span class='news-badge'>✨ Denní přehled</span><p class='news-desc'>Chyba AI (" + esc(String(errDetail).slice(0, 120)) + "). Zkus klepnout na ↻ nahoře.</p></article>";
         return;
       }
       try {
@@ -452,16 +417,12 @@
         localStorage.setItem(slotKey, JSON.stringify({ html, ts }));
         showDigestCard(html, ts);
       } catch (_) {
-        infoFeed.innerHTML = `<article class="news-card">
-          <span class="news-badge">✨ Denní přehled</span>
-          <p class="news-desc">Chyba při zpracování souhrnu. Zkus obnovit (↻).</p>
-        </article>`;
+        infoFeed.innerHTML = "<article class='news-card'><span class='news-badge'>✨ Denní přehled</span><p class='news-desc'>Chyba při zpracování souhrnu. Zkus obnovit (↻).</p></article>";
       }
     };
 
     androidCall("askGemini", reqId, apiKey, payload);
   }
-
   async function loadInfoFeed(force = false) {
     if (infoCat === "pocasi") {
       if (weatherCache && !force) {
@@ -501,7 +462,7 @@
       return;
     }
     const q = search.value.trim().toLocaleLowerCase("cs");
-        const filtered = newsItems.filter(item => {
+    const filtered = newsItems.filter(item => {
       if (infoCat !== "all" && item.cat !== infoCat) return false;
       return !q || item.title.toLocaleLowerCase("cs").includes(q) || item.desc.toLocaleLowerCase("cs").includes(q);
     });
@@ -510,18 +471,18 @@
       infoFeed.innerHTML = "<p style='text-align:center;color:#7b8885;margin-top:30px'>Žádné zprávy k zobrazení. Zkus obnovit (↻).</p>";
       return;
     }
-    infoFeed.innerHTML = filtered.map((item, idx) => `
-      <article class="news-card" data-idx="${idx}">
-        <span class="news-badge">${esc(item.source)} · ${fmt(item.ts)}</span>
-        <h4 class="news-title">${esc(item.title)}</h4>
-        ${item.desc ? `<p class="news-desc">${esc(item.desc)}...</p>` : ""}
-        <div class="news-actions">
-          ${item.link ? `<button type="button" data-news-act="open">🔗 Číst</button>` : ""}
-          <button type="button" data-news-act="save">⭐ Uložit</button>
-          <button type="button" class="remind-btn" data-news-act="remind">🔔 Připomenout</button>
-        </div>
-      </article>
-    `).join("");
+
+    infoFeed.innerHTML = filtered.map((item, idx) =>
+      "<article class='news-card' data-idx='" + idx + "'>" +
+      "<span class='news-badge'>" + esc(item.source) + " · " + fmt(item.ts) + "</span>" +
+      "<h4 class='news-title'>" + esc(item.title) + "</h4>" +
+      (item.desc ? "<p class='news-desc'>" + esc(item.desc) + "...</p>" : "") +
+      "<div class='news-actions'>" +
+      (item.link ? "<button type='button' data-news-act='open'>🔗 Číst</button>" : "") +
+      "<button type='button' data-news-act='save'>⭐ Uložit</button>" +
+      "<button type='button' class='remind-btn' data-news-act='remind'>🔔 Připomenout</button>" +
+      "</div></article>"
+    ).join("");
 
     infoFeed.onclick = e => {
       const btn = e.target.closest("button");
@@ -544,14 +505,15 @@
           pinned: false,
           deleted: false
         });
-        saveNotes();
+        save();
         btn.textContent = "✓ Uloženo";
       } else if (btn.dataset.newsAct === "remind") {
-        openAlarm(null, item.title);
+        target = null;
+        draft.value = item.title;
+        openAlarm(null);
       }
     };
   }
-
   window.onGeminiResult = function(reqId, ok, respBody) {
     const cb = pendingGemini[reqId];
     if (cb) {
@@ -561,10 +523,13 @@
   };
 
   function appendAiBubble(role, text, withActions = false) {
-    const history = $("#aiHistory");
     const div = document.createElement("div");
     div.className = "ai-bubble " + role;
-    div.textContent = text;
+    if (role === "assistant") {
+      div.innerHTML = esc(text).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br>");
+    } else {
+      div.textContent = text;
+    }
     if (withActions && text) {
       const actRow = document.createElement("div");
       actRow.className = "news-actions";
@@ -574,17 +539,21 @@
       saveB.textContent = "⭐ Uložit do poznámek";
       saveB.onclick = () => {
         notes.push({ id: Date.now(), text, created: Date.now(), alarm: null, baseAt: null, repeat: "none", pinned: false, deleted: false });
-        saveNotes();
+        save();
         saveB.textContent = "✓ Uloženo";
       };
       const remB = document.createElement("button");
       remB.type = "button";
       remB.textContent = "🔔 Připomenout";
-      remB.onclick = () => openAlarm(null, text.slice(0, 100));
+      remB.onclick = () => {
+        target = null;
+        draft.value = text.slice(0, 100);
+        openAlarm(null);
+      };
       actRow.append(saveB, remB);
       div.appendChild(actRow);
     }
-    history.appendChild(div);
+    aiHistory.appendChild(div);
     aiPanel.scrollTop = aiPanel.scrollHeight;
     return div;
   }
@@ -600,12 +569,12 @@
     const loadingBubble = appendAiBubble("system", "Přemýšlím a hledám...");
 
     const activeNotes = notes.filter(n => !n.deleted).map(n =>
-      `- ${n.text}${n.alarm ? " [Budík: " + fmt(n.alarm) + "]" : ""}`
+      "- " + n.text + (n.alarm ? " [Budík: " + fmt(n.alarm) + "]" : "")
     ).join("\n");
 
-    const newsSummary = newsItems.slice(0, 15).map(i => `- [${i.source}] ${i.title}`).join("\n");
+    const newsSummary = newsItems.slice(0, 15).map(i => "- [" + i.source + "] " + i.title).join("\n");
     const weatherSummary = weatherCache?.current
-      ? `Praha 9 právě teď: ${Math.round(weatherCache.current.temperature_2m)} °C (pocitově ${Math.round(weatherCache.current.apparent_temperature)} °C), ${wmoToCzech(weatherCache.current.weather_code).text}.`
+      ? "Praha 9 právě teď: " + Math.round(weatherCache.current.temperature_2m) + " °C (pocitově " + Math.round(weatherCache.current.apparent_temperature) + " °C), " + wmoToCzech(weatherCache.current.weather_code).text + "."
       : "";
 
     const systemPrompt =
@@ -625,8 +594,7 @@
       if (!ok) {
         let errDetail = respBody;
         try {
-          const errJson = JSON.parse(respBody);
-          errDetail = errJson?.error?.message || respBody;
+          errDetail = JSON.parse(respBody)?.error?.message || respBody;
         } catch (_) {}
         appendAiBubble("assistant", "Chyba Gemini API: " + errDetail);
         return;
@@ -655,23 +623,23 @@
     infoFeed.classList.toggle("hidden", tab !== "info");
     aiPanel.classList.toggle("hidden", tab !== "ai");
 
-    subNavNotes.classList.toggle("hidden", tab !== "notes");
-    subNavFeed.classList.toggle("hidden", tab !== "info");
+    $("#subNavNotes").classList.toggle("hidden", tab !== "notes");
+    $("#subNavFeed").classList.toggle("hidden", tab !== "info");
 
     if (tab === "notes") {
       draft.placeholder = "Napiš nebo nadiktuj zápisek...";
-      addBtn.textContent = "Přidat";
-      alarmBtn.classList.remove("hidden");
-      renderNotes();
+      $("#add").textContent = "Přidat";
+      $("#alarm").classList.remove("hidden");
+      render(false);
     } else if (tab === "info") {
       draft.placeholder = "Rychlý zápisek k přečtenému článku...";
-      addBtn.textContent = "Uložit";
-      alarmBtn.classList.add("hidden");
+      $("#add").textContent = "Uložit";
+      $("#alarm").classList.add("hidden");
       loadInfoFeed(false);
     } else if (tab === "ai") {
       draft.placeholder = "Zeptej se Gemini (např. Mám připomínku na STK?)...";
-      addBtn.textContent = "Zeptat se";
-      alarmBtn.classList.add("hidden");
+      $("#add").textContent = "Zeptat se";
+      $("#alarm").classList.add("hidden");
       aiPanel.scrollTop = aiPanel.scrollHeight;
     }
   }
@@ -680,54 +648,132 @@
     btn.onclick = () => switchTab(btn.dataset.tab);
   });
 
-  subNavNotes.onclick = e => {
-    const btn = e.target.closest("button[data-view]");
-    if (!btn) return;
-    view = btn.dataset.view;
-    subNavNotes.querySelectorAll("button[data-view]").forEach(b => b.classList.toggle("active", b === btn));
-    renderNotes();
-  };
-
-  subNavFeed.onclick = e => {
-    const btn = e.target.closest("button[data-cat]");
-    if (!btn) return;
-    infoCat = btn.dataset.cat;
-    subNavFeed.querySelectorAll("button[data-cat]").forEach(b => b.classList.toggle("active", b === btn));
-    renderInfoFeed();
-  };
-
-  $("#refreshFeed").onclick = () => loadInfoFeed(true);
-
-  addBtn.onclick = () => {
+  $("#add").onclick = () => {
     const text = draft.value.trim();
     if (!text) return;
     if (activeTab === "ai") {
       draft.value = "";
       sendAiQuery(text);
-    } else {
-      const id = Date.now();
-      notes.push({ id, text, created: id, alarm: null, baseAt: null, repeat: "none", pinned: false, deleted: false });
-      saveNotes();
-      draft.value = "";
-      if (activeTab === "notes") renderNotes();
+      return;
     }
+    const n = {
+      id: Date.now(),
+      text,
+      created: Date.now(),
+      alarm: draftAlarm,
+      baseAt: draftAlarm,
+      repeat: draftRepeat,
+      pinned: false,
+      deleted: false
+    };
+    notes.push(n);
+    if (n.alarm) nativeSchedule(n);
+    draft.value = "";
+    localStorage.removeItem("draft");
+    draftAlarm = null;
+    draftRepeat = "none";
+    save();
+    if (activeTab !== "notes") switchTab("notes");
+    render(true);
+    draft.blur();
   };
 
+  draft.value = localStorage.getItem("draft") || "";
+  draft.oninput = () => localStorage.setItem("draft", draft.value);
+
   search.oninput = () => {
-    if (activeTab === "notes") renderNotes();
+    if (activeTab === "notes") render(false);
     else if (activeTab === "info") renderInfoFeed();
   };
 
+  document.querySelectorAll("#subNavNotes [data-view]").forEach(b => b.onclick = () => {
+    view = b.dataset.view;
+    document.querySelectorAll("#subNavNotes [data-view]").forEach(x => x.classList.toggle("active", x === b));
+    render(false);
+  });
+
+  document.querySelectorAll("#subNavFeed [data-cat]").forEach(b => b.onclick = () => {
+    infoCat = b.dataset.cat;
+    document.querySelectorAll("#subNavFeed [data-cat]").forEach(x => x.classList.toggle("active", x === b));
+    renderInfoFeed();
+  });
+  $("#refreshFeed").onclick = () => loadInfoFeed(true);
+
+  feed.onclick = e => {
+    const card = e.target.closest(".note");
+    if (!card) return;
+    target = notes.find(n => String(n.id) === card.dataset.id);
+    if (!target) return;
+    const a = e.target.closest("button")?.dataset.action;
+    if (a === "alarm") openAlarm(target);
+    if (a === "share") androidCall("share", target.text);
+    if (a === "menu") openMenu();
+  };
+
+  function openMenu() {
+    const box = $("#menuItems");
+    box.innerHTML = "";
+    const items = target.deleted
+      ? [["Obnovit", "restore"], ["Smazat natrvalo", "perma"]]
+      : [
+          ["Upravit text", "edit"],
+          ["Změnit upomínku", "alarm"],
+          [target.pinned ? "Odepnout" : "Připnout", "pin"],
+          ["Poslat e-mailem", "email"],
+          ["Přesunout do koše", "delete"]
+        ];
+    items.forEach(([t, a]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "menu-item";
+      b.textContent = t;
+      b.onclick = () => menuAction(a);
+      box.append(b);
+    });
+    menuDialog.showModal();
+  }
+
+  function menuAction(a) {
+    if (a === "edit") {
+      const v = prompt("Upravit text", target.text);
+      if (v?.trim()) {
+        target.text = v.trim();
+        if (target.alarm) nativeSchedule(target);
+      }
+    }
+    if (a === "alarm") {
+      menuDialog.close();
+      openAlarm(target);
+      return;
+    }
+    if (a === "pin") target.pinned = !target.pinned;
+    if (a === "email") androidCall("email", target.text);
+    if (a === "delete") {
+      target.deleted = true;
+      androidCall("cancelAlarm", String(target.id));
+    }
+    if (a === "restore") target.deleted = false;
+    if (a === "perma") {
+      androidCall("cancelAlarm", String(target.id));
+      notes = notes.filter(n => n !== target);
+    }
+    save();
+    menuDialog.close();
+    render(false);
+  }
+
+  $("#closeMenu").onclick = () => menuDialog.close();
+
   $("#settings").onclick = () => {
-    apiKeyInput.value = localStorage.getItem("gemini_api_key") || "";
+    $("#geminiKeyInput").value = localStorage.getItem("gemini_api_key") || "";
     settingsDialog.showModal();
   };
+  $("#closeSettings").onclick = () => settingsDialog.close();
   $("#saveSettings").onclick = () => {
-    localStorage.setItem("gemini_api_key", apiKeyInput.value.trim());
+    const key = $("#geminiKeyInput").value.trim();
+    localStorage.setItem("gemini_api_key", key);
     settingsDialog.close();
   };
-  $("#cancelSettings").onclick = () => settingsDialog.close();
 
-  loadNotes();
-  renderNotes();
+  render(true);
 })();
