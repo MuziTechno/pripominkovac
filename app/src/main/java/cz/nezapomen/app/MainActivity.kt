@@ -185,33 +185,52 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        @JavascriptInterface
-        fun askGemini(requestId: String, apiKey: String, payloadJson: String) {
-            thread {
+           @JavascriptInterface
+    fun askGemini(requestId: String, apiKey: String, payloadJson: String) {
+        thread {
+            val models = listOf("gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite")
+            var lastCode = 0
+            var lastBody = "Chyba spojeni s Gemini"
+
+            for (model in models) {
                 try {
-                    val url = URL("https://" + "generativelanguage." + "googleapis." + "com/v1beta/models/gemini-3.8-flash:generateContent?key=$apiKey")
+                    val baseUrl = "https://" + "generativelanguage." + "googleapis." + "com/v1beta/models/"
+                    val url = URL("$baseUrl$model:generateContent?key=$apiKey")
                     val conn = (url.openConnection() as HttpURLConnection).apply {
                         requestMethod = "POST"
                         doOutput = true
                         connectTimeout = 15000
-                        readTimeout = 15000
+                        readTimeout = 20000
                         setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                     }
                     conn.outputStream.use { it.write(payloadJson.toByteArray(Charsets.UTF_8)) }
-                    val code = conn.responseCode
-                    val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                    val body = stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    val escaped = JSONObject.quote(body)
-                    runOnUiThread {
-                        webView.evaluateJavascript("if(window.onGeminiResult) window.onGeminiResult('$requestId', ${code in 200..299}, $escaped);", null)
+                    lastCode = conn.responseCode
+                    val stream = if (lastCode in 200..299) conn.inputStream else conn.errorStream
+                    lastBody = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+
+                    if (lastCode in 200..299) {
+                        val escaped = JSONObject.quote(lastBody)
+                        runOnUiThread {
+                            webView.evaluateJavascript("if(window.onGeminiResult) window.onGeminiResult('$requestId', true, $escaped);", null)
+                        }
+                        return@thread
+                    }
+                    if (lastCode == 400 || lastCode == 401 || lastCode == 403) {
+                        break
                     }
                 } catch (e: Exception) {
-                    val err = JSONObject.quote(e.message ?: "Chyba spojení s Gemini")
-                    runOnUiThread {
-                        webView.evaluateJavascript("if(window.onGeminiResult) window.onGeminiResult('$requestId', false, $err);", null)
-                    }
+                    lastBody = e.message ?: "Chyba spojeni s Gemini"
                 }
             }
+
+            val escapedErr = JSONObject.quote(lastBody)
+            runOnUiThread {
+                webView.evaluateJavascript("if(window.onGeminiResult) window.onGeminiResult('$requestId', false, $escapedErr);", null)
+            }
+        }
+    }
+}
+
         }
     }
 }
