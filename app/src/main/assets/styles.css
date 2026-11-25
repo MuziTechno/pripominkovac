@@ -312,3 +312,32 @@ menu {
   border-bottom: 1px solid #d9e4df;
   border-radius: 0;
 }
+.weather-hours-scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 6px 0 2px;
+}
+.weather-hour {
+  min-width: 56px;
+  background: #f2f7f5;
+  border-radius: 12px;
+  padding: 8px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 12px;
+  color: #1a2b25;
+}
+.weather-day-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #eef3f1;
+  font-size: 14px;
+  color: #1a2b25;
+}
+.weather-day-row:last-child {
+  border-bottom: none;
+}
