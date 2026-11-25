@@ -347,3 +347,215 @@
     aiPanel.scrollTop = aiPanel.scrollHeight;
     return div;
   }
+  function sendAiQuery(question) {
+    const apiKey = localStorage.getItem("gemini_api_key") || "";
+    appendAiBubble("user", question);
+    if (!apiKey) {
+      appendAiBubble("assistant", "Nemáš nastavený Gemini API klíč. Klikni nahoře v Připomínkovači na ⚙ (Nastavení) a vlož svůj klíč.");
+      return;
+    }
+
+    const loadingBubble = appendAiBubble("assistant", "Přemýšlím a prohledávám data...");
+    const activeNotesText = notes
+      .filter(n => !n.deleted)
+      .map(n => "- " + n.text + (n.alarm ? " (budík: " + fmt(n.alarm) + ")" : ""))
+      .join("\n") || "Žádné uložené poznámky.";
+    const newsSummary = newsItems
+      .slice(0, 25)
+      .map(i => "[" + i.source + "] " + i.title)
+      .join("\n") || "Zprávy zatím nebyly načteny.";
+
+    const systemPrompt = "Jsi osobní asistent v aplikaci Připomínkovač a InfoKanál. Dnešní datum a čas je " + new Date().toLocaleString("cs-CZ") + ".\nOdpovídej stručně, jasně a česky.\nUživatelovy uložené poznámky a budíky:\n" + activeNotesText + "\n\nAktuální zprávy z InfoKanálu:\n" + newsSummary;
+
+    const payload = JSON.stringify({
+      contents: [{ parts: [{ text: systemPrompt + "\n\nDotaz uživatele: " + question }] }],
+      tools: [{ googleSearch: {} }]
+    });
+
+    const reqId = "gem_" + Math.random().toString(36).slice(2);
+    pendingGemini[reqId] = (ok, respBody) => {
+      loadingBubble.remove();
+      if (!ok) {
+        appendAiBubble("assistant", "Chyba při komunikaci s Gemini API. Zkontroluj API klíč nebo připojení k internetu.");
+        return;
+      }
+      try {
+        const data = JSON.parse(respBody);
+        const parts = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
+        const answer = Array.isArray(parts) ? parts.map(p => p.text || "").join("") : "Nepodařilo se získat odpověď.";
+        appendAiBubble("assistant", answer.trim(), true);
+      } catch (_) {
+        appendAiBubble("assistant", "Nepodařilo se zpracovat odpověď od Gemini.");
+      }
+    };
+
+    if (androidCall("askGemini", reqId, apiKey, payload) === null) {
+      loadingBubble.remove();
+      appendAiBubble("assistant", "Funkce AI vyžaduje spuštění v Android aplikaci.");
+    }
+  }
+
+  function switchTab(tab) {
+    activeTab = tab;
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+
+    feed.classList.toggle("hidden", tab !== "notes");
+    infoFeed.classList.toggle("hidden", tab !== "info");
+    aiPanel.classList.toggle("hidden", tab !== "ai");
+
+    $("#subNavNotes").classList.toggle("hidden", tab !== "notes");
+    $("#subNavFeed").classList.toggle("hidden", tab !== "info");
+
+    if (tab === "notes") {
+      search.placeholder = "Hledat v zápiscích...";
+      draft.placeholder = "Napiš nebo nadiktuj zápisek...";
+      $("#add").textContent = "Přidat";
+      render(false);
+    } else if (tab === "info") {
+      search.placeholder = "Filtrovat novinky...";
+      draft.placeholder = "Rychlý zápisek...";
+      $("#add").textContent = "Přidat";
+      loadInfoFeed(false);
+    } else if (tab === "ai") {
+      search.placeholder = "Hledat v zápiscích...";
+      draft.placeholder = "Zeptej se Gemini (např. Mám připomínku na STK?)...";
+      $("#add").textContent = "Zeptat se";
+      if (!newsItems.length) loadInfoFeed(false);
+    }
+  }
+
+  document.querySelectorAll(".tab-btn").forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+
+  $("#add").onclick = () => {
+    const text = draft.value.trim();
+    if (!text) return;
+
+    if (activeTab === "ai") {
+      draft.value = "";
+      localStorage.removeItem("draft");
+      sendAiQuery(text);
+      draft.blur();
+      return;
+    }
+
+    const n = {
+      id: Date.now(),
+      text,
+      created: Date.now(),
+      alarm: draftAlarm,
+      baseAt: draftAlarm,
+      repeat: draftRepeat,
+      pinned: false,
+      deleted: false
+    };
+    notes.push(n);
+    if (n.alarm) nativeSchedule(n);
+    draft.value = "";
+    localStorage.removeItem("draft");
+    draftAlarm = null;
+    draftRepeat = "none";
+    save();
+    if (activeTab !== "notes") switchTab("notes");
+    render(true);
+    draft.blur();
+  };
+
+  draft.value = localStorage.getItem("draft") || "";
+  draft.oninput = () => localStorage.setItem("draft", draft.value);
+
+  search.oninput = () => {
+    if (activeTab === "notes") render(false);
+    else if (activeTab === "info") renderInfoFeed();
+  };
+
+  document.querySelectorAll("#subNavNotes [data-view]").forEach(b => b.onclick = () => {
+    view = b.dataset.view;
+    document.querySelectorAll("#subNavNotes [data-view]").forEach(x => x.classList.toggle("active", x === b));
+    render(false);
+  });
+
+  document.querySelectorAll("#subNavFeed [data-cat]").forEach(b => b.onclick = () => {
+    infoCat = b.dataset.cat;
+    document.querySelectorAll("#subNavFeed [data-cat]").forEach(x => x.classList.toggle("active", x === b));
+    renderInfoFeed();
+  });
+  $("#refreshFeed").onclick = () => loadInfoFeed(true);
+
+  feed.onclick = e => {
+    const card = e.target.closest(".note");
+    if (!card) return;
+    target = notes.find(n => String(n.id) === card.dataset.id);
+    if (!target) return;
+    const a = e.target.closest("button")?.dataset.action;
+    if (a === "alarm") openAlarm(target);
+    if (a === "share") androidCall("share", target.text);
+    if (a === "menu") openMenu();
+  };
+
+  function openMenu() {
+    const box = $("#menuItems");
+    box.innerHTML = "";
+    const items = target.deleted
+      ? [["Obnovit", "restore"], ["Smazat natrvalo", "perma"]]
+      : [
+          ["Upravit text", "edit"],
+          ["Změnit upomínku", "alarm"],
+          [target.pinned ? "Odepnout" : "Připnout", "pin"],
+          ["Poslat e-mailem", "email"],
+          ["Přesunout do koše", "delete"]
+        ];
+    items.forEach(([t, a]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "menu-item";
+      b.textContent = t;
+      b.onclick = () => menuAction(a);
+      box.append(b);
+    });
+    menuDialog.showModal();
+  }
+
+  function menuAction(a) {
+    if (a === "edit") {
+      const v = prompt("Upravit text", target.text);
+      if (v?.trim()) {
+        target.text = v.trim();
+        if (target.alarm) nativeSchedule(target);
+      }
+    }
+    if (a === "alarm") {
+      menuDialog.close();
+      openAlarm(target);
+      return;
+    }
+    if (a === "pin") target.pinned = !target.pinned;
+    if (a === "email") androidCall("email", target.text);
+    if (a === "delete") {
+      target.deleted = true;
+      androidCall("cancelAlarm", String(target.id));
+    }
+    if (a === "restore") target.deleted = false;
+    if (a === "perma") {
+      androidCall("cancelAlarm", String(target.id));
+      notes = notes.filter(n => n !== target);
+    }
+    save();
+    menuDialog.close();
+    render(false);
+  }
+
+  $("#closeMenu").onclick = () => menuDialog.close();
+
+  $("#settings").onclick = () => {
+    $("#geminiKeyInput").value = localStorage.getItem("gemini_api_key") || "";
+    settingsDialog.showModal();
+  };
+  $("#closeSettings").onclick = () => settingsDialog.close();
+  $("#saveSettings").onclick = () => {
+    const key = $("#geminiKeyInput").value.trim();
+    localStorage.setItem("gemini_api_key", key);
+    settingsDialog.close();
+  };
+
+  render(true);
+})();
