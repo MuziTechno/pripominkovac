@@ -7,10 +7,44 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.Ringtone
+import android.media.RingtoneManager
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+
+object AlarmSoundPlayer {
+    private var ringtone: Ringtone? = null
+
+    fun start(context: Context) {
+        stop()
+        try {
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val r = RingtoneManager.getRingtone(context.applicationContext, uri)
+            if (Build.VERSION.SDK_INT >= 28) {
+                r.isLooping = true
+            }
+            r.audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            r.play()
+            ringtone = r
+        } catch (_: Exception) {
+        }
+    }
+
+    fun stop() {
+        try {
+            ringtone?.stop()
+        } catch (_: Exception) {
+        }
+        ringtone = null
+    }
+}
 
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -23,22 +57,33 @@ class AlarmReceiver : BroadcastReceiver() {
             val text = intent.getStringExtra("text") ?: "Upomínka"
             val repeat = intent.getStringExtra("repeat") ?: "none"
             val baseAt = intent.getLongExtra("baseAt", System.currentTimeMillis())
-            val channelId = "alarm_silent_v3"
+            val channelId = "alarm_ring_v4"
+
+            val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 
             if (Build.VERSION.SDK_INT >= 26) {
+                val audioAttrs = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+
                 val channel = NotificationChannel(
                     channelId,
-                    "Budíky",
+                    "Budíky a připomínky",
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                    setSound(null, null)
-                    enableVibration(false)
+                    setSound(alarmUri, audioAttrs)
+                    enableVibration(true)
+                    vibrationPattern = longArrayOf(0, 500, 300, 500)
                     setBypassDnd(true)
                 }
                 context.getSystemService(NotificationManager::class.java)
                     .createNotificationChannel(channel)
             }
+
+            AlarmSoundPlayer.start(context)
 
             val ringIntent = Intent(context, RingActivity::class.java).apply {
                 putExtra("id", id)
@@ -66,8 +111,9 @@ class AlarmReceiver : BroadcastReceiver() {
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setSound(alarmUri)
+                .setVibrate(longArrayOf(0, 500, 300, 500))
                 .setOngoing(true)
-                .setSilent(true)
                 .setContentIntent(fullScreenPendingIntent)
                 .setFullScreenIntent(fullScreenPendingIntent, true)
                 .build()
@@ -75,6 +121,11 @@ class AlarmReceiver : BroadcastReceiver() {
             try {
                 NotificationManagerCompat.from(context).notify(id.hashCode(), notification)
             } catch (_: SecurityException) {
+            }
+
+            try {
+                context.startActivity(ringIntent)
+            } catch (_: Exception) {
             }
         } finally {
             if (wakeLock.isHeld) {
