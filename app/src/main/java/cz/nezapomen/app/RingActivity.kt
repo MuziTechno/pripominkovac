@@ -8,9 +8,12 @@ import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.speech.tts.TextToSpeech
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.Button
@@ -21,17 +24,28 @@ import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
+import java.time.LocalTime
 import java.time.Year
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.util.Locale
 
 class RingActivity : AppCompatActivity() {
 
     private var mediaPlayer: MediaPlayer? = null
+    private var tts: TextToSpeech? = null
+    private val speechHandler = Handler(Looper.getMainLooper())
     private var alarmId: String = ""
     private var alarmText: String = ""
     private var repeatRule: String = "none"
     private var baseAt: Long = 0L
+
+    private val repeatSpeechRunnable = object : Runnable {
+        override fun run() {
+            speakCurrentTimeAndReminder()
+            speechHandler.postDelayed(this, 12_000L)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,9 +59,32 @@ class RingActivity : AppCompatActivity() {
         setTurnScreenOn(true)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        AlarmSoundPlayer.stop()
         startAlarmSound()
         startVibration()
+        initTtsAndSpeak()
         setContentView(createAlarmScreen())
+    }
+
+    private fun initTtsAndSpeak() {
+        tts = TextToSpeech(this) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale("cs", "CZ")
+                tts?.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                speechHandler.postDelayed(repeatSpeechRunnable, 1_500L)
+            }
+        }
+    }
+
+    private fun speakCurrentTimeAndReminder() {
+        val now = LocalTime.now()
+        val msg = "Je ${now.hour} hodin ${now.minute} minut. Připomínka: $alarmText."
+        tts?.speak(msg, TextToSpeech.QUEUE_FLUSH, null, "alarm_tts")
     }
 
     private fun createAlarmScreen(): LinearLayout {
@@ -130,7 +167,6 @@ class RingActivity : AppCompatActivity() {
 
         return root
     }
-
     private fun recordAlarmUpdate(id: String, newAt: Long, newBaseAt: Long, dismissed: Boolean) {
         val prefs = getSharedPreferences("alarms", Context.MODE_PRIVATE)
         val updatesRaw = prefs.getString("updates", "[]") ?: "[]"
@@ -200,6 +236,7 @@ class RingActivity : AppCompatActivity() {
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build()
             )
+            setVolume(0.35f, 0.35f)
             isLooping = true
             prepare()
             start()
@@ -230,6 +267,11 @@ class RingActivity : AppCompatActivity() {
     }
 
     private fun stopAlarmAndClose() {
+        AlarmSoundPlayer.stop()
+        speechHandler.removeCallbacks(repeatSpeechRunnable)
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
         mediaPlayer?.run {
             if (isPlaying) stop()
             release()
@@ -237,12 +279,15 @@ class RingActivity : AppCompatActivity() {
         mediaPlayer = null
         stopVibration()
         getSystemService(NotificationManager::class.java).cancel(alarmId.hashCode())
-        finishAndRemoveTask()
+        finish()
     }
 
     override fun onDestroy() {
+        AlarmSoundPlayer.stop()
+        speechHandler.removeCallbacks(repeatSpeechRunnable)
+        tts?.stop()
+        tts?.shutdown()
         mediaPlayer?.release()
-        mediaPlayer = null
         stopVibration()
         super.onDestroy()
     }
