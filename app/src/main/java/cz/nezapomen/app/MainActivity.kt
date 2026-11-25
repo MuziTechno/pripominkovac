@@ -188,7 +188,7 @@ class MainActivity : AppCompatActivity() {
            @JavascriptInterface
     fun askGemini(requestId: String, apiKey: String, payloadJson: String) {
         thread {
-            val models = listOf("gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite")
+            val models = listOf("gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite")
             var lastCode = 0
             var lastBody = "Chyba spojeni s Gemini"
 
