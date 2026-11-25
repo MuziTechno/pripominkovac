@@ -7,55 +7,64 @@ import android.content.Intent
 import android.os.Build
 
 object AlarmScheduler {
+    private const val ACTION_ALARM = "cz.nezapomen.app.ALARM"
 
-    fun schedule(context: Context, id: String, text: String, at: Long): Boolean {
-        val manager = context.getSystemService(AlarmManager::class.java)
-        val receiverIntent = Intent(context, AlarmReceiver::class.java).apply {
-            action = "cz.muzitechno.pripominkovac.ALARM"
+    fun schedule(
+        context: Context,
+        id: String,
+        text: String,
+        at: Long,
+        repeat: String = "none",
+        baseAt: Long = at
+    ): Boolean {
+        val alarmManager = context.getSystemService(AlarmManager::class.java)
+        if (Build.VERSION.SDK_INT >= 31 && !alarmManager.canScheduleExactAlarms()) {
+            return false
+        }
+
+        val intent = Intent(context, AlarmReceiver::class.java).apply {
+            action = ACTION_ALARM
             putExtra("id", id)
             putExtra("text", text)
+            putExtra("repeat", repeat)
+            putExtra("baseAt", baseAt)
         }
-        val alarmPendingIntent = PendingIntent.getBroadcast(
+
+        val pendingIntent = PendingIntent.getBroadcast(
             context,
             id.hashCode(),
-            receiverIntent,
+            intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !manager.canScheduleExactAlarms()) {
-                false
-            } else {
-                val showIntent = PendingIntent.getActivity(
-                    context,
-                    id.hashCode(),
-                    Intent(context, MainActivity::class.java),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                manager.setAlarmClock(
-                    AlarmManager.AlarmClockInfo(at, showIntent),
-                    alarmPendingIntent
-                )
-                true
-            }
-        } catch (_: SecurityException) {
-            false
-        }
+        val showIntent = PendingIntent.getActivity(
+            context,
+            id.hashCode() + 100000,
+            Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        alarmManager.setAlarmClock(
+            AlarmManager.AlarmClockInfo(at, showIntent),
+            pendingIntent
+        )
+        return true
     }
 
     fun cancel(context: Context, id: String) {
+        val alarmManager = context.getSystemService(AlarmManager::class.java)
         val intent = Intent(context, AlarmReceiver::class.java).apply {
-            action = "cz.muzitechno.pripominkovac.ALARM"
+            action = ACTION_ALARM
         }
-        val pi = PendingIntent.getBroadcast(
+        val pendingIntent = PendingIntent.getBroadcast(
             context,
             id.hashCode(),
             intent,
             PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
         )
-        if (pi != null) {
-            context.getSystemService(AlarmManager::class.java).cancel(pi)
-            pi.cancel()
+        if (pendingIntent != null) {
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
         }
     }
 }
