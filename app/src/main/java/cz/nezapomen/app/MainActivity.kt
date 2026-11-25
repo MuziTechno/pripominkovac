@@ -189,7 +189,7 @@ class MainActivity : AppCompatActivity() {
         fun askGemini(requestId: String, apiKey: String, payloadJson: String) {
             thread {
                 try {
-                    val url = URL("https://googleapis.com")
+                    val url = URL("https://" + "generativelanguage." + "googleapis." + "com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey")
                     val conn = (url.openConnection() as HttpURLConnection).apply {
                         requestMethod = "POST"
                         doOutput = true
