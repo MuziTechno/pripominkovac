@@ -11,6 +11,7 @@
   const menuDialog = $("#menuDialog");
   const settingsDialog = $("#settingsDialog");
   const repeatSelect = $("#repeat");
+  const alarmBtn = $("#alarm");
 
   const DEFAULT_TOPICS = "Zprávy z Česka, světové novinky, filmy a seriály (Netflix/HBO), GeForce NOW a hry, fyzika a vesmír";
 
@@ -33,6 +34,7 @@
   let draftAlarm = null;
   let draftRepeat = "none";
   let target = null;
+  let quickRemindText = null;
   let newsItems = [];
   let weatherCache = null;
   const pendingFetches = {};
@@ -43,6 +45,17 @@
       return window.Android[method](...args);
     }
     return null;
+  }
+
+  function updateDraftAlarmBtn() {
+    if (!alarmBtn) return;
+    if (draftAlarm && draftAlarm > Date.now()) {
+      alarmBtn.classList.add("armed");
+      alarmBtn.textContent = "⏰ " + new Date(draftAlarm).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" });
+    } else {
+      alarmBtn.classList.remove("armed");
+      alarmBtn.textContent = "⏰ Budík";
+    }
   }
 
   window.applyAlarmUpdates = function(updatesJson) {
@@ -155,11 +168,12 @@
     return result;
   }
 
-  function openAlarm(n) {
+  function openAlarm(n, presetText = null) {
     target = n || null;
-    const a = (target?.alarm && target.alarm > Date.now()) ? target.alarm : draftAlarm;
+    quickRemindText = presetText;
+    const a = (target?.alarm && target.alarm > Date.now()) ? target.alarm : (!quickRemindText ? draftAlarm : null);
     $("#datetime").value = a ? new Date(a - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
-    repeatSelect.value = target?.repeat || draftRepeat || "none";
+    repeatSelect.value = target?.repeat || (!quickRemindText ? draftRepeat : "none") || "none";
     alarmDialog.showModal();
   }
 
@@ -170,9 +184,24 @@
       target.baseAt = at;
       target.repeat = rep;
       nativeSchedule(target);
+    } else if (quickRemindText) {
+      const n = {
+        id: Date.now(),
+        text: quickRemindText,
+        created: Date.now(),
+        alarm: at,
+        baseAt: at,
+        repeat: rep,
+        pinned: false,
+        deleted: false
+      };
+      notes.push(n);
+      nativeSchedule(n);
+      quickRemindText = null;
     } else {
       draftAlarm = at;
       draftRepeat = rep;
+      updateDraftAlarmBtn();
     }
     save();
     alarmDialog.close();
@@ -192,8 +221,11 @@
     if (at > Date.now()) setAlarm(at);
     else alert("Vyber budoucí datum a čas.");
   };
-  $("#cancelAlarm").onclick = () => alarmDialog.close();
-  $("#alarm").onclick = () => openAlarm(null);
+  $("#cancelAlarm").onclick = () => {
+    quickRemindText = null;
+    alarmDialog.close();
+  };
+  alarmBtn.onclick = () => openAlarm(null, null);
 
   const RSS_SOURCES = [
     { cat: "domov", label: "ČT24 Domov", url: "https://" + "ct24." + "ceskatelevize." + "cz/rss/tema/domaci-9025" },
@@ -398,7 +430,7 @@
       "Vytvoř stručný přehled novinek v češtině pro Prahu 9 (" + fmt(Date.now()) + ").\n" +
       "Začni krátkou sekcí 🌤 **Počasí** (3 krátké odrážky) a potom přehledně rozděl novinky podle těchto témat uživatele:\n" +
       userTopics + "\n\n" +
-      "Pravidla: Každé téma napiš jako tučný nadpis s vhodným emoji a pod něj dej přesně 3 krátké, věcné odrážky z dodaných titulků. Když zmiňuješ položku ze seznamu, napiš za větu její číslo v hranaté závorce např..\n\n" +
+      "Pravidla: Každé téma napiš jako tučný nadpis s vhodným emoji a pod něj dej přesně 3 krátké, věcné odrážky z dodaných titulků. Když zmiňuješ položku ze seznamu, napiš za větu její číslo v hranaté závorce např. [1].\n\n" +
       "POČASÍ:\n" + weatherCtx + "\n\n" +
       "TITULKY:\n" + articlesList;
 
@@ -417,18 +449,17 @@
         const parts = data?.candidates?.at(0)?.content?.parts;
         const text = Array.isArray(parts) ? parts.map(p => p.text || "").join("").trim() : "";
         if (!text) throw new Error("empty");
-        const html = formatDigestHtml(text, indexedItems);
-        const ts = Date.now();
-        localStorage.setItem(slotKey, JSON.stringify({ html, ts }));
-        showDigestCard(html, ts);
-      } catch (_) {
-        infoFeed.innerHTML = "<article class='news-card'><span class='news-badge'>✨ AI Přehled</span><p class='news-desc'>Chyba při zpracování souhrnu. Zkus obnovit (↻).</p></article>";
-      }
-    };
-
-    androidCall("askGemini", reqId, apiKey, payload);
-  }
-  async function loadInfoFeed(force = false) {
+const html = formatDigestHtml(text, indexedItems);
+const ts = Date.now();
+localStorage.setItem(slotKey, JSON.stringify({ html, ts }));
+showDigestCard(html, ts);
+} catch (_) {
+infoFeed.innerHTML = "✨ AI PřehledChyba při zpracování souhrnu. Zkus obnovit (↻).";
+}
+};
+androidCall("askGemini", reqId, apiKey, payload);
+}
+    async function loadInfoFeed(force = false) {
     if (infoCat === "pocasi") {
       if (weatherCache && !force) {
         renderWeatherView();
@@ -513,9 +544,7 @@
         save();
         btn.textContent = "✓ Uloženo";
       } else if (btn.dataset.newsAct === "remind") {
-        target = null;
-        draft.value = item.title;
-        openAlarm(null);
+        openAlarm(null, item.title);
       }
     };
   }
@@ -552,9 +581,7 @@
       remB.type = "button";
       remB.textContent = "🔔 Připomenout";
       remB.onclick = () => {
-        target = null;
-        draft.value = text.slice(0, 100);
-        openAlarm(null);
+        openAlarm(null, text.slice(0, 120));
       };
       actRow.append(saveB, remB);
       div.appendChild(actRow);
@@ -634,17 +661,17 @@
     if (tab === "notes") {
       draft.placeholder = "Napiš nebo nadiktuj zápisek...";
       $("#add").textContent = "Přidat";
-      $("#alarm").classList.remove("hidden");
+      alarmBtn.classList.remove("invisible");
       render(false);
     } else if (tab === "info") {
       draft.placeholder = "Rychlý zápisek k přečtenému článku...";
       $("#add").textContent = "Uložit";
-      $("#alarm").classList.add("hidden");
+      alarmBtn.classList.remove("invisible");
       loadInfoFeed(false);
     } else if (tab === "ai") {
       draft.placeholder = "Zeptej se Gemini (např. Mám připomínku na STK?)...";
       $("#add").textContent = "Zeptat se";
-      $("#alarm").classList.add("hidden");
+      alarmBtn.classList.add("invisible");
       aiPanel.scrollTop = aiPanel.scrollHeight;
     }
   }
@@ -677,6 +704,7 @@
     localStorage.removeItem("draft");
     draftAlarm = null;
     draftRepeat = "none";
+    updateDraftAlarmBtn();
     save();
     if (activeTab !== "notes") switchTab("notes");
     render(true);
@@ -710,7 +738,7 @@
     target = notes.find(n => String(n.id) === card.dataset.id);
     if (!target) return;
     const a = e.target.closest("button")?.dataset.action;
-    if (a === "alarm") openAlarm(target);
+    if (a === "alarm") openAlarm(target, null);
     if (a === "share") androidCall("share", target.text);
     if (a === "menu") openMenu();
   };
@@ -748,7 +776,7 @@
     }
     if (a === "alarm") {
       menuDialog.close();
-      openAlarm(target);
+      openAlarm(target, null);
       return;
     }
     if (a === "pin") target.pinned = !target.pinned;
