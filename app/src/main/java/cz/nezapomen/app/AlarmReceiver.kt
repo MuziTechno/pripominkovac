@@ -69,18 +69,18 @@ class AlarmReceiver : BroadcastReceiver() {
             val text = intent.getStringExtra("text") ?: "Upomínka"
             val repeat = intent.getStringExtra("repeat") ?: "none"
             val baseAt = intent.getLongExtra("baseAt", System.currentTimeMillis())
-            val channelId = "alarm_fullscreen_v7"
+            val channelId = "alarm_samsung_v8"
             val nm = context.getSystemService(NotificationManager::class.java)
 
             if (Build.VERSION.SDK_INT >= 26) {
                 val channel = NotificationChannel(
                     channelId,
-                    "Budíky na celou obrazovku",
+                    "Budíky",
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                     setSound(null, null)
-                    enableVibration(false)
+                    enableVibration(true)
                     setBypassDnd(true)
                 }
                 nm.createNotificationChannel(channel)
@@ -95,7 +95,8 @@ class AlarmReceiver : BroadcastReceiver() {
                 putExtra("baseAt", baseAt)
                 addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_NO_USER_ACTION
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
                 )
             }
 
@@ -113,14 +114,17 @@ class AlarmReceiver : BroadcastReceiver() {
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .setSilent(true)
                 .setAutoCancel(false)
-                .setOngoing(false)
                 .setContentIntent(fullScreenPendingIntent)
                 .setFullScreenIntent(fullScreenPendingIntent, true)
                 .build()
 
             nm.notify(id.hashCode(), notification)
+
+            try {
+                context.startActivity(ringIntent)
+            } catch (_: Exception) {
+            }
         } finally {
             if (screenWakeLock.isHeld) {
                 screenWakeLock.release()
