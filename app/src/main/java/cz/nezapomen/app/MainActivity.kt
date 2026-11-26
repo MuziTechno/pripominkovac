@@ -5,6 +5,7 @@ import android.app.AlarmManager
 import android.app.NotificationManager
 import android.content.Intent
 import android.graphics.Color
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -21,6 +22,7 @@ import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -123,6 +125,62 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        @JavascriptInterface
+        fun getAlarmSounds(): String {
+            val prefs = getSharedPreferences("alarms", MODE_PRIVATE)
+            val selectedUri = prefs.getString("alarm_sound_uri", "") ?: ""
+            val result = JSONArray()
+            result.put(JSONObject().apply {
+                put("title", "Výchozí zvuk budíku")
+                put("uri", "")
+            })
+
+            try {
+                val mgr = RingtoneManager(this@MainActivity)
+                mgr.setType(RingtoneManager.TYPE_ALARM)
+                val cursor = mgr.cursor
+                while (cursor.moveToNext()) {
+                    val title = cursor.getString(RingtoneManager.TITLE_COLUMN_INDEX) ?: "Budík"
+                    val uri = mgr.getRingtoneUri(cursor.position)?.toString() ?: ""
+                    if (uri.isNotEmpty()) {
+                        result.put(JSONObject().apply {
+                            put("title", title)
+                            put("uri", uri)
+                        })
+                    }
+                }
+            } catch (_: Exception) {
+            }
+
+            try {
+                val mgrRing = RingtoneManager(this@MainActivity)
+                mgrRing.setType(RingtoneManager.TYPE_RINGTONE)
+                val cursorRing = mgrRing.cursor
+                var count = 0
+                while (cursorRing.moveToNext() && count < 15) {
+                    val title = cursorRing.getString(RingtoneManager.TITLE_COLUMN_INDEX) ?: "Vyzvánění"
+                    val uri = mgrRing.getRingtoneUri(cursorRing.position)?.toString() ?: ""
+                    if (uri.isNotEmpty()) {
+                        result.put(JSONObject().apply {
+                            put("title", "♪ $title")
+                            put("uri", uri)
+                        })
+                        count++
+                    }
+                }
+            } catch (_: Exception) {
+            }
+
+            return JSONObject().apply {
+                put("selected", selectedUri)
+                put("sounds", result)
+            }.toString()
+        }
+
+        @JavascriptInterface
+        fun setAlarmSound(uri: String) {
+            getSharedPreferences("alarms", MODE_PRIVATE).edit().putString("alarm_sound_uri", uri).apply()
+        }
 
         @JavascriptInterface
         fun openUrl(url: String) = runOnUiThread {
@@ -185,49 +243,47 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-           @JavascriptInterface
-    fun askGemini(requestId: String, apiKey: String, payloadJson: String) {
-        thread {
-            val models = listOf("gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite")
-            var lastCode = 0
-            var lastBody = "Chyba spojeni s Gemini"
+        @JavascriptInterface
+        fun askGemini(requestId: String, apiKey: String, payloadJson: String) {
+            thread {
+                val models = listOf("gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite")
+                var lastCode = 0
+                var lastBody = "Chyba spojeni s Gemini"
 
-            for (model in models) {
-                try {
-                    val baseUrl = "https://" + "generativelanguage." + "googleapis." + "com/v1beta/models/"
-                    val url = URL("$baseUrl$model:generateContent?key=$apiKey")
-                    val conn = (url.openConnection() as HttpURLConnection).apply {
-                        requestMethod = "POST"
-                        doOutput = true
-                        connectTimeout = 15000
-                        readTimeout = 20000
-                        setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                    }
-                    conn.outputStream.use { it.write(payloadJson.toByteArray(Charsets.UTF_8)) }
-                    lastCode = conn.responseCode
-                    val stream = if (lastCode in 200..299) conn.inputStream else conn.errorStream
-                    lastBody = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
-
-                    if (lastCode in 200..299) {
-                        val escaped = JSONObject.quote(lastBody)
-                        runOnUiThread {
-                            webView.evaluateJavascript("if(window.onGeminiResult) window.onGeminiResult('$requestId', true, $escaped);", null)
+                for (model in models) {
+                    try {
+                        val baseUrl = "https://" + "generativelanguage." + "googleapis." + "com/v1beta/models/"
+                        val url = URL("$baseUrl$model:generateContent?key=$apiKey")
+                        val conn = (url.openConnection() as HttpURLConnection).apply {
+                            requestMethod = "POST"
+                            connectTimeout = 15000
+                            readTimeout = 25000
+                            doOutput = true
+                            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                         }
-                        return@thread
+                        conn.outputStream.use { os ->
+                            os.write(payloadJson.toByteArray(Charsets.UTF_8))
+                        }
+                        lastCode = conn.responseCode
+                        val stream = if (lastCode in 200..299) conn.inputStream else conn.errorStream
+                        lastBody = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+                        if (lastCode in 200..299) {
+                            val escaped = JSONObject.quote(lastBody)
+                            runOnUiThread {
+                                webView.evaluateJavascript("if(window.onNativeGeminiResult) window.onNativeGeminiResult('$requestId', true, $escaped);", null)
+                            }
+                            return@thread
+                        }
+                    } catch (e: Exception) {
+                        lastBody = e.message ?: "Chyba sítě"
                     }
-                    if (lastCode == 400 || lastCode == 401 || lastCode == 403) {
-                        break
-                    }
-                } catch (e: Exception) {
-                    lastBody = e.message ?: "Chyba spojeni s Gemini"
                 }
-            }
 
-            val escapedErr = JSONObject.quote(lastBody)
-            runOnUiThread {
-                webView.evaluateJavascript("if(window.onGeminiResult) window.onGeminiResult('$requestId', false, $escapedErr);", null)
+                val errEscaped = JSONObject.quote("HTTP $lastCode: $lastBody")
+                runOnUiThread {
+                    webView.evaluateJavascript("if(window.onNativeGeminiResult) window.onNativeGeminiResult('$requestId', false, $errEscaped);", null)
+                }
             }
         }
     }
-}
 }
