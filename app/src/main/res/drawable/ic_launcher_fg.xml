@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://android.com"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Velké tmavě zelené P -->
+    <path
+        android:fillColor="#26473D"
+        android:pathData="M30,24 H54 C64.5,24 72,30.8 72,40.5 C72,50.2 64.5,57 54,57 H39.5 V81 H30 Z M39.5,32 V49 H53.2 C59.2,49 62.6,45.6 62.6,40.5 C62.6,35.4 59.2,32 53.2,32 Z" />
+
+    <!-- Tři krémové linky textu -->
+    <path
+        android:fillColor="#F4EFE4"
+        android:pathData="M45,65.5 H66.5 A1.5,1.5 0 0 1 66.5,68.5 H45 A1.5,1.5 0 0 1 45,65.5 Z" />
+    <path
+        android:fillColor="#F4EFE4"
+        android:pathData="M45,71.5 H66.5 A1.5,1.5 0 0 1 66.5,74.5 H45 A1.5,1.5 0 0 1 45,71.5 Z" />
+    <path
+        android:fillColor="#F4EFE4"
+        android:pathData="M45,77.5 H66.5 A1.5,1.5 0 0 1 66.5,80.5 H45 A1.5,1.5 0 0 1 45,77.5 Z" />
+
+    <!-- Zvonečky budíku -->
+    <path
+        android:fillColor="#9A5B40"
+        android:pathData="M71.5,64.8 A3.2,3.2 0 0 1 76.2,63.2 L72.5,67.5 A3.2,3.2 0 0 1 71.5,64.8 Z" />
+    <path
+        android:fillColor="#9A5B40"
+        android:pathData="M85.5,64.8 A3.2,3.2 0 0 0 80.8,63.2 L84.5,67.5 A3.2,3.2 0 0 0 85.5,64.8 Z" />
+
+    <!-- Nožičky budíku -->
+    <path
+        android:strokeColor="#9A5B40"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M74.2,78.5 L72.5,80.8 M82.8,78.5 L84.5,80.8" />
+
+    <!-- Tělo a ciferník budíku -->
+    <path
+        android:fillColor="#9A5B40"
+        android:pathData="M78.5,65.2 A7.5,7.5 0 1,1 78.49,65.2 Z" />
+    <path
+        android:fillColor="#E9D6C4"
+        android:pathData="M78.5,67.2 A5.5,5.5 0 1,1 78.49,67.2 Z" />
+
+    <!-- Ručičky budíku -->
+    <path
+        android:strokeColor="#7A442E"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:pathData="M78.5,69.3 V72.7 L80.8,71.4" />
+</vector>
