@@ -56,21 +56,24 @@ object AlarmSoundPlayer {
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-        val wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Nezapomen:AlarmWakeLock")
-        wakeLock.acquire(10_000L)
+        @Suppress("DEPRECATION")
+        val screenWakeLock = pm.newWakeLock(
+            PowerManager.FULL_WAKE_LOCK or
+            PowerManager.ACQUIRE_CAUSES_WAKEUP or
+            PowerManager.ON_AFTER_RELEASE,
+            "Nezapomen:ScreenWakeLock"
+        )
+        screenWakeLock.acquire(15_000L)
 
         try {
             val id = intent.getStringExtra("id") ?: return
             val text = intent.getStringExtra("text") ?: "Upomínka"
             val repeat = intent.getStringExtra("repeat") ?: "none"
             val baseAt = intent.getLongExtra("baseAt", System.currentTimeMillis())
-            val channelId = "alarm_visual_v5"
+            val channelId = "alarm_visual_v6"
 
             if (Build.VERSION.SDK_INT >= 26) {
                 val nm = context.getSystemService(NotificationManager::class.java)
-                nm.deleteNotificationChannel("alarm_silent_v3")
-                nm.deleteNotificationChannel("alarm_ring_v4")
-
                 val channel = NotificationChannel(
                     channelId,
                     "Budíky a připomínky",
@@ -94,7 +97,8 @@ class AlarmReceiver : BroadcastReceiver() {
                 addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                 )
             }
 
@@ -128,8 +132,8 @@ class AlarmReceiver : BroadcastReceiver() {
             } catch (_: Exception) {
             }
         } finally {
-            if (wakeLock.isHeld) {
-                wakeLock.release()
+            if (screenWakeLock.isHeld) {
+                screenWakeLock.release()
             }
         }
     }
