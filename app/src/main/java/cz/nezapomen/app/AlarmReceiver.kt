@@ -10,6 +10,7 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
@@ -21,8 +22,14 @@ object AlarmSoundPlayer {
     fun start(context: Context) {
         stop()
         try {
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val prefs = context.getSharedPreferences("alarms", Context.MODE_PRIVATE)
+            val savedUriStr = prefs.getString("alarm_sound_uri", null)
+            val uri = if (!savedUriStr.isNullOrBlank()) {
+                Uri.parse(savedUriStr)
+            } else {
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            }
             val r = RingtoneManager.getRingtone(context.applicationContext, uri)
             if (Build.VERSION.SDK_INT >= 28) {
                 r.isLooping = true
@@ -57,16 +64,12 @@ class AlarmReceiver : BroadcastReceiver() {
             val text = intent.getStringExtra("text") ?: "Upomínka"
             val repeat = intent.getStringExtra("repeat") ?: "none"
             val baseAt = intent.getLongExtra("baseAt", System.currentTimeMillis())
-            val channelId = "alarm_ring_v4"
-
-            val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val channelId = "alarm_visual_v5"
 
             if (Build.VERSION.SDK_INT >= 26) {
-                val audioAttrs = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
+                val nm = context.getSystemService(NotificationManager::class.java)
+                nm.deleteNotificationChannel("alarm_silent_v3")
+                nm.deleteNotificationChannel("alarm_ring_v4")
 
                 val channel = NotificationChannel(
                     channelId,
@@ -74,13 +77,11 @@ class AlarmReceiver : BroadcastReceiver() {
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                    setSound(alarmUri, audioAttrs)
-                    enableVibration(true)
-                    vibrationPattern = longArrayOf(0, 500, 300, 500)
+                    setSound(null, null)
+                    enableVibration(false)
                     setBypassDnd(true)
                 }
-                context.getSystemService(NotificationManager::class.java)
-                    .createNotificationChannel(channel)
+                nm.createNotificationChannel(channel)
             }
 
             AlarmSoundPlayer.start(context)
@@ -106,14 +107,13 @@ class AlarmReceiver : BroadcastReceiver() {
 
             val notification = NotificationCompat.Builder(context, channelId)
                 .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-                .setContentTitle("Budík")
+                .setContentTitle("Připomínkovač")
                 .setContentText(text)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .setSound(alarmUri)
-                .setVibrate(longArrayOf(0, 500, 300, 500))
-                .setOngoing(true)
+                .setSilent(true)
+                .setAutoCancel(false)
                 .setContentIntent(fullScreenPendingIntent)
                 .setFullScreenIntent(fullScreenPendingIntent, true)
                 .build()
