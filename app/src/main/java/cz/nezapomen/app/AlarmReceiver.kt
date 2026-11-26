@@ -14,7 +14,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 
 object AlarmSoundPlayer {
     private var ringtone: Ringtone? = null
@@ -70,13 +69,13 @@ class AlarmReceiver : BroadcastReceiver() {
             val text = intent.getStringExtra("text") ?: "Upomínka"
             val repeat = intent.getStringExtra("repeat") ?: "none"
             val baseAt = intent.getLongExtra("baseAt", System.currentTimeMillis())
-            val channelId = "alarm_visual_v6"
+            val channelId = "alarm_fullscreen_v7"
+            val nm = context.getSystemService(NotificationManager::class.java)
 
             if (Build.VERSION.SDK_INT >= 26) {
-                val nm = context.getSystemService(NotificationManager::class.java)
                 val channel = NotificationChannel(
                     channelId,
-                    "Budíky a připomínky",
+                    "Budíky na celou obrazovku",
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
@@ -96,9 +95,7 @@ class AlarmReceiver : BroadcastReceiver() {
                 putExtra("baseAt", baseAt)
                 addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                    Intent.FLAG_ACTIVITY_NO_USER_ACTION
                 )
             }
 
@@ -118,19 +115,12 @@ class AlarmReceiver : BroadcastReceiver() {
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setSilent(true)
                 .setAutoCancel(false)
+                .setOngoing(false)
                 .setContentIntent(fullScreenPendingIntent)
                 .setFullScreenIntent(fullScreenPendingIntent, true)
                 .build()
 
-            try {
-                NotificationManagerCompat.from(context).notify(id.hashCode(), notification)
-            } catch (_: SecurityException) {
-            }
-
-            try {
-                context.startActivity(ringIntent)
-            } catch (_: Exception) {
-            }
+            nm.notify(id.hashCode(), notification)
         } finally {
             if (screenWakeLock.isHeld) {
                 screenWakeLock.release()
