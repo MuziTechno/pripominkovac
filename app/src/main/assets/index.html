@@ -17,15 +17,10 @@
       <button type="button" id="settings" title="Nastavení">⚙</button>
     </nav>
     <nav id="subNavFeed" class="hidden">
-            <div class="chips-scroll">
+      <div class="chips-scroll">
         <button type="button" data-cat="prehled" class="active">✨ Přehled</button>
-        <button type="button" data-cat="all">Vše</button>
         <button type="button" data-cat="pocasi">🌤 Počasí</button>
-        <button type="button" data-cat="domov">Česko</button>
-        <button type="button" data-cat="svet">Svět</button>
-        <button type="button" data-cat="filmy">Filmy &amp; Stream</button>
-        <button type="button" data-cat="hry">GFN &amp; Hry</button>
-        <button type="button" data-cat="vesmir">Fyzika &amp; Vesmír</button>
+        <button type="button" data-cat="all">📰 Vše</button>
       </div>
       <button type="button" id="refreshFeed" title="Obnovit zprávy">↻</button>
     </nav>
@@ -90,10 +85,18 @@
 
 <dialog id="settingsDialog">
   <h3>Nastavení aplikace</h3>
-  <label>Gemini API klíč (pro Lupu 🔍)
+  <label>Zvuk budíku
+    <select id="alarmSoundSelect">
+      <option value="">Výchozí zvuk budíku</option>
+    </select>
+  </label>
+  <label>Témata AI přehledu (✨ Přehled)
+    <textarea id="aiTopicsInput" rows="3" placeholder="Zprávy z Česka, světové novinky, filmy a seriály (Netflix/HBO), GeForce NOW a hry, fyzika a vesmír"></textarea>
+  </label>
+  <label>Gemini API klíč (pro Lupu 🔍 a Přehled)
     <input id="geminiKeyInput" type="password" placeholder="AIzaSy...">
   </label>
-  <p class="hint">Klíč se ukládá pouze bezpečně v paměti tvého telefonu. Získáš ho zdarma v Google AI Studio.</p>
+  <p class="hint">Nastavení se ukládá pouze v paměti tvého telefonu.</p>
   <menu>
     <button type="button" id="closeSettings">Zrušit</button>
     <button type="button" id="saveSettings">Uložit</button>
