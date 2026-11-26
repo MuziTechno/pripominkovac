@@ -12,6 +12,8 @@
   const settingsDialog = $("#settingsDialog");
   const repeatSelect = $("#repeat");
 
+  const DEFAULT_TOPICS = "Zprávy z Česka, světové novinky, filmy a seriály (Netflix/HBO), GeForce NOW a hry, fyzika a vesmír";
+
   let notes = [];
   try {
     notes = JSON.parse(localStorage.getItem("notes") || "[]");
@@ -52,13 +54,13 @@
         const note = notes.find(n => String(n.id) === String(u.id));
         if (note) {
           if (u.dismissed) {
-            note.alarm = null;
             note.baseAt = null;
+            changed = true;
           } else if (u.at > 0) {
             note.alarm = u.at;
             note.baseAt = u.baseAt || u.at;
+            changed = true;
           }
-          changed = true;
         }
       });
       if (changed) {
@@ -109,7 +111,6 @@
       minute: "2-digit"
     });
   }
-
   function render(bottom) {
     const q = search.value.trim().toLocaleLowerCase("cs");
     const now = Date.now();
@@ -119,7 +120,7 @@
       return !q || n.text.toLocaleLowerCase("cs").includes(q);
     });
     feed.innerHTML = list.length ? list.map(n => {
-      const overdue = n.alarm && n.alarm < now;
+      const overdue = n.alarm && n.alarm <= now;
       const rep = repeatLabel(n.repeat);
       return `<article class="note" data-id="${n.id}">
         <div class="top">
@@ -139,6 +140,12 @@
     if (bottom) feed.scrollTop = feed.scrollHeight;
   }
 
+  setInterval(() => {
+    if (activeTab === "notes" && !alarmDialog.open && !menuDialog.open && !settingsDialog.open) {
+      render(false);
+    }
+  }, 30000);
+
   function nativeSchedule(n) {
     const result = androidCall("scheduleAlarm", String(n.id), n.text, n.alarm, n.repeat || "none", n.baseAt || n.alarm);
     if (result === "exact_alarm_permission_required") {
@@ -150,7 +157,7 @@
 
   function openAlarm(n) {
     target = n || null;
-    const a = target?.alarm || draftAlarm;
+    const a = (target?.alarm && target.alarm > Date.now()) ? target.alarm : draftAlarm;
     $("#datetime").value = a ? new Date(a - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
     repeatSelect.value = target?.repeat || draftRepeat || "none";
     alarmDialog.showModal();
@@ -187,9 +194,11 @@
   };
   $("#cancelAlarm").onclick = () => alarmDialog.close();
   $("#alarm").onclick = () => openAlarm(null);
+
   const RSS_SOURCES = [
-    { cat: "domov", label: "ČT24 Domov", url: "https://" + "ct24." + "ceskatelevize." + "cz/rss/tema/domaci-11220" },
-    { cat: "svet", label: "ČT24 Svět", url: "https://" + "ct24." + "ceskatelevize." + "cz/rss/tema/svet-11221" },
+    { cat: "domov", label: "ČT24 Domov", url: "https://" + "ct24." + "ceskatelevize." + "cz/rss/tema/domaci-9025" },
+    { cat: "domov", label: "iROZHLAS ČR", url: "https://" + "www." + "irozhlas." + "cz/rss/irozhlas/section/zpravy-domov" },
+    { cat: "svet", label: "ČT24 Svět", url: "https://" + "ct24." + "ceskatelevize." + "cz/rss/tema/svet-9026" },
     { cat: "filmy", label: "Filmy & Kino", url: "https://" + "www." + "totalfilm." + "cz/feed/" },
     { cat: "filmy", label: "Nové trailery", url: "https://" + "www." + "totalfilm." + "cz/kategorie/trailery/feed/" },
     { cat: "filmy", label: "Streamy & VOD", url: "https://" + "filmtoro." + "cz/rss" },
@@ -231,7 +240,6 @@
       if (androidCall("fetchUrl", reqId, src.url) === null) resolve([]);
     });
   }
-
   function wmoToCzech(code) {
     if (code === 0) return { icon: "☀️", text: "Jasno" };
     if (code === 1 || code === 2) return { icon: "⛅", text: "Polojasno" };
@@ -309,11 +317,10 @@
       "<article class='news-card'><span class='news-badge'>Nejbližších 12 hodin</span><div class='weather-hours-scroll'>" + hourlyHtml + "</div></article>" +
       "<article class='news-card'><span class='news-badge'>Výhled na 5 dní</span>" + dailyHtml + "</article>";
   }
-  function getDaySlotKey() {
-    const now = new Date();
-    const h = now.getHours();
-    const slot = h < 11 ? "rano" : (h < 17 ? "odpoledne" : "vecer");
-    return "daily_digest_" + now.toISOString().slice(0, 10) + "_" + slot;
+
+  function getThreeHourSlotKey() {
+    const block = Math.floor(Date.now() / (1.5 * 3600 * 1000));
+    return "digest_90m_" + block;
   }
 
   function formatDigestHtml(rawText, indexedItems) {
@@ -332,7 +339,7 @@
     infoFeed.innerHTML =
       "<article class='news-card' style='line-height:1.55'>" +
       "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<span class='news-badge'>✨ Denní přehled · " + fmt(ts) + "</span>" +
+      "<span class='news-badge'>✨ AI Přehled (1,5 h) · " + fmt(ts) + "</span>" +
       "<button type='button' id='regenDigestBtn' style='font-size:12px;padding:4px 10px;border-radius:12px;border:1px solid #cddbd6;background:#f2f7f5;color:#1a2b25'>↻ Nový souhrn</button>" +
       "</div><div class='digest-body' style='font-size:14px;color:#1a2b25'>" + html + "</div></article>";
 
@@ -349,11 +356,11 @@
   function renderDailyDigest(force = false) {
     const apiKey = (localStorage.getItem("gemini_api_key") || "").trim();
     if (!apiKey) {
-      infoFeed.innerHTML = "<article class='news-card'><span class='news-badge'>✨ Denní přehled</span><p class='news-desc'>Pro automatický souhrn vlož nejprve svůj <strong>Gemini API klíč</strong> pod ikonkou <strong>⚙</strong>.</p></article>";
+      infoFeed.innerHTML = "<article class='news-card'><span class='news-badge'>✨ AI Přehled</span><p class='news-desc'>Pro automatický souhrn vlož nejprve svůj <strong>Gemini API klíč</strong> pod ikonkou <strong>⚙</strong>.</p></article>";
       return;
     }
 
-    const slotKey = getDaySlotKey();
+    const slotKey = getThreeHourSlotKey();
     const cachedRaw = !force ? localStorage.getItem(slotKey) : null;
     if (cachedRaw) {
       try {
@@ -363,12 +370,11 @@
       } catch (_) {}
     }
 
-    infoFeed.innerHTML = "<article class='news-card'><span class='news-badge'>✨ Denní přehled · AI</span><p style='color:#5a756c;margin:10px 0'>Připravuji stručný souhrn dne (počasí, ČR, filmy, trailery, gamesy, vesmír)...</p></article>";
+    infoFeed.innerHTML = "<article class='news-card'><span class='news-badge'>✨ AI Přehled · 1,5 h</span><p style='color:#5a756c;margin:10px 0'>Připravuji aktuální souhrn podle tvých témat...</p></article>";
 
     const indexedItems = [];
-    ["domov", "filmy", "hry", "vesmir"].forEach(cat => {
-      const limit = cat === "filmy" ? 6 : 4;
-      newsItems.filter(x => x.cat === cat).slice(0, limit).forEach(item => {
+    ["domov", "svet", "filmy", "hry", "vesmir"].forEach(cat => {
+      newsItems.filter(x => x.cat === cat).slice(0, 6).forEach(item => {
         indexedItems.push(item);
       });
     });
@@ -386,14 +392,13 @@
         "Zítra " + wmoToCzech(d.weather_code.at(1)).text + ", " + Math.round(d.temperature_2m_min.at(1)) + " až " + Math.round(d.temperature_2m_max.at(1)) + " °C.";
     }
 
+    const userTopics = (localStorage.getItem("ai_digest_topics") || DEFAULT_TOPICS).trim() || DEFAULT_TOPICS;
+
     const prompt =
-      "Vytvoř stručný denní souhrn v češtině pro Prahu 9 (" + fmt(Date.now()) + ") přesně v těchto 5 sekcích:\n" +
-      "🌤 **Počasí**\n" +
-      "🇨🇿 **Důležité z ČR**\n" +
-      "🎬 **Nové filmy, trailery a streamy**\n" +
-      "🎮 **Gamesy**\n" +
-      "🚀 **Zajímavost z fyziky / vesmíru**\n\n" +
-      "Pravidla: Každou sekci napiš ve 2 krátkých odrážkách. Když zmiňuješ položku ze seznamu, napiš za větu její číslo v hranaté závorce např. [1].\n\n" +
+      "Vytvoř stručný přehled novinek v češtině pro Prahu 9 (" + fmt(Date.now()) + ").\n" +
+      "Začni krátkou sekcí 🌤 **Počasí** (3 krátké odrážky) a potom přehledně rozděl novinky podle těchto témat uživatele:\n" +
+      userTopics + "\n\n" +
+      "Pravidla: Každé téma napiš jako tučný nadpis s vhodným emoji a pod něj dej přesně 3 krátké, věcné odrážky z dodaných titulků. Když zmiňuješ položku ze seznamu, napiš za větu její číslo v hranaté závorce např..\n\n" +
       "POČASÍ:\n" + weatherCtx + "\n\n" +
       "TITULKY:\n" + articlesList;
 
@@ -404,7 +409,7 @@
       if (!ok) {
         let errDetail = respBody;
         try { errDetail = JSON.parse(respBody)?.error?.message || respBody; } catch (_) {}
-        infoFeed.innerHTML = "<article class='news-card'><span class='news-badge'>✨ Denní přehled</span><p class='news-desc'>Chyba AI (" + esc(String(errDetail).slice(0, 120)) + "). Zkus klepnout na ↻ nahoře.</p></article>";
+        infoFeed.innerHTML = "<article class='news-card'><span class='news-badge'>✨ AI Přehled</span><p class='news-desc'>Chyba AI (" + esc(String(errDetail).slice(0, 120)) + "). Zkus klepnout na ↻ nahoře.</p></article>";
         return;
       }
       try {
@@ -417,7 +422,7 @@
         localStorage.setItem(slotKey, JSON.stringify({ html, ts }));
         showDigestCard(html, ts);
       } catch (_) {
-        infoFeed.innerHTML = "<article class='news-card'><span class='news-badge'>✨ Denní přehled</span><p class='news-desc'>Chyba při zpracování souhrnu. Zkus obnovit (↻).</p></article>";
+        infoFeed.innerHTML = "<article class='news-card'><span class='news-badge'>✨ AI Přehled</span><p class='news-desc'>Chyba při zpracování souhrnu. Zkus obnovit (↻).</p></article>";
       }
     };
 
@@ -514,7 +519,8 @@
       }
     };
   }
-  window.onGeminiResult = function(reqId, ok, respBody) {
+
+  window.onNativeGeminiResult = function(reqId, ok, respBody) {
     const cb = pendingGemini[reqId];
     if (cb) {
       delete pendingGemini[reqId];
@@ -557,7 +563,6 @@
     aiPanel.scrollTop = aiPanel.scrollHeight;
     return div;
   }
-
   function sendAiQuery(question) {
     const apiKey = (localStorage.getItem("gemini_api_key") || "").trim();
     if (!apiKey) {
@@ -766,12 +771,42 @@
 
   $("#settings").onclick = () => {
     $("#geminiKeyInput").value = localStorage.getItem("gemini_api_key") || "";
+    const topicsEl = $("#aiTopicsInput");
+    if (topicsEl) {
+      topicsEl.value = localStorage.getItem("ai_digest_topics") || DEFAULT_TOPICS;
+    }
+    const soundSel = $("#alarmSoundSelect");
+    if (soundSel) {
+      const raw = androidCall("getAlarmSounds");
+      if (raw) {
+        try {
+          const data = JSON.parse(raw);
+          soundSel.innerHTML = (data.sounds || []).map(s =>
+            `<option value="${esc(s.uri)}">${esc(s.title)}</option>`
+          ).join("");
+          soundSel.value = data.selected || "";
+        } catch (_) {}
+      }
+    }
     settingsDialog.showModal();
   };
   $("#closeSettings").onclick = () => settingsDialog.close();
   $("#saveSettings").onclick = () => {
     const key = $("#geminiKeyInput").value.trim();
     localStorage.setItem("gemini_api_key", key);
+    const topicsEl = $("#aiTopicsInput");
+    if (topicsEl) {
+      const prevTopics = localStorage.getItem("ai_digest_topics") || DEFAULT_TOPICS;
+      const newTopics = topicsEl.value.trim() || DEFAULT_TOPICS;
+      localStorage.setItem("ai_digest_topics", newTopics);
+      if (prevTopics !== newTopics) {
+        localStorage.removeItem(getThreeHourSlotKey());
+      }
+    }
+    const soundSel = $("#alarmSoundSelect");
+    if (soundSel) {
+      androidCall("setAlarmSound", soundSel.value || "");
+    }
     settingsDialog.close();
   };
 
