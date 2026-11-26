@@ -51,13 +51,7 @@ class RingActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
         }
-        @Suppress("DEPRECATION")
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
-        )
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         tts = TextToSpeech(this, this)
         startVibration()
