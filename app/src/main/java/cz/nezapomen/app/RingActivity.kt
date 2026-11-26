@@ -3,6 +3,10 @@ package cz.nezapomen.app
 import android.app.NotificationManager
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.media.AudioAttributes
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -43,9 +47,17 @@ class RingActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         repeatRule = intent.getStringExtra("repeat") ?: "none"
         baseAt = intent.getLongExtra("baseAt", System.currentTimeMillis())
 
-        setShowWhenLocked(true)
-        setTurnScreenOn(true)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        }
+        @Suppress("DEPRECATION")
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+        )
 
         tts = TextToSpeech(this, this)
         startVibration()
@@ -58,43 +70,86 @@ class RingActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
                 tts?.setLanguage(Locale.getDefault())
             }
+            tts?.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
             tts?.setSpeechRate(0.95f)
             speakReminder()
-            speechHandler.postDelayed({ speakReminder() }, 5500L)
+            speechHandler.postDelayed({ speakReminder() }, 5000L)
         }
     }
 
     private fun speakReminder() {
         try {
             val cleanText = alarmText.trim().ifEmpty { "Upomínka" }
-            tts?.speak("Připomínka: $cleanText", TextToSpeech.QUEUE_FLUSH, null, "alarm_tts")
+            val params = Bundle().apply {
+                putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM)
+                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+            }
+            tts?.speak("Připomínka: $cleanText", TextToSpeech.QUEUE_FLUSH, params, "alarm_tts")
         } catch (_: Exception) {
         }
     }
 
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun pillDrawable(bgColor: Int, radiusDp: Int, strokeColor: Int = Color.TRANSPARENT): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(radiusDp).toFloat()
+            setColor(bgColor)
+            if (strokeColor != Color.TRANSPARENT) {
+                setStroke(dp(1), strokeColor)
+            }
+        }
+    }
     private fun createAlarmScreen(): LinearLayout {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(24, 40, 24, 40)
-            setBackgroundColor(Color.rgb(231, 240, 236))
+            setPadding(dp(24), dp(36), dp(24), dp(36))
+            setBackgroundColor(Color.parseColor("#F6F3EE"))
         }
 
-        root.addView(TextView(this).apply {
-            text = "⏰"
-            textSize = 56f
-            gravity = Gravity.CENTER
-        })
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(24), dp(32), dp(24), dp(28))
+            background = pillDrawable(Color.WHITE, 28, Color.parseColor("#E3DFD7"))
+            elevation = dp(6).toFloat()
+        }
 
-        root.addView(TextView(this).apply {
+        val badge = TextView(this).apply {
+            text = "⏰  PŘIPOMÍNKA"
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#3F6258"))
+            background = pillDrawable(Color.parseColor("#E7F0EC"), 20)
+            setPadding(dp(16), dp(7), dp(16), dp(7))
+        }
+        card.addView(badge)
+
+        val titleView = TextView(this).apply {
             text = alarmText
             textSize = 26f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#1D2624"))
             gravity = Gravity.CENTER
-            setPadding(0, 20, 0, 24)
-        })
+            setPadding(dp(8), dp(24), dp(8), dp(28))
+        }
+        card.addView(titleView)
 
-        root.addView(Button(this).apply {
-            text = "Vypnout"
+        val stopBtn = Button(this).apply {
+            text = "✓  Vypnout budík"
+            textSize = 17f
+            isAllCaps = false
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = pillDrawable(Color.parseColor("#3F6258"), 24)
+            setPadding(dp(36), dp(14), dp(36), dp(14))
             setOnClickListener {
                 if (repeatRule == "none") {
                     recordAlarmUpdate(alarmId, 0L, 0L, true)
@@ -112,14 +167,17 @@ class RingActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
                 stopAlarmAndClose(cancelNotification = false)
             }
-        })
+        }
+        card.addView(stopBtn)
 
-        root.addView(TextView(this).apply {
-            text = "Odložit"
-            textSize = 18f
+        val snoozeLabel = TextView(this).apply {
+            text = "Odložit o:"
+            textSize = 14f
+            setTextColor(Color.parseColor("#6D7875"))
             gravity = Gravity.CENTER
-            setPadding(0, 20, 0, 6)
-        })
+            setPadding(0, dp(24), 0, dp(10))
+        }
+        card.addView(snoozeLabel)
 
         val snoozeRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -127,8 +185,19 @@ class RingActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         listOf(5, 10, 30, 60, 120, 180).forEach { minutes ->
-            snoozeRow.addView(Button(this).apply {
+            val btn = Button(this).apply {
                 text = if (minutes < 60) "$minutes min" else "${minutes / 60} h"
+                textSize = 14f
+                isAllCaps = false
+                setTextColor(Color.parseColor("#2A3D38"))
+                background = pillDrawable(Color.parseColor("#EFF4F2"), 20, Color.parseColor("#D5E2DD"))
+                setPadding(dp(16), dp(10), dp(16), dp(10))
+                val lp = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                lp.setMargins(dp(4), 0, dp(4), 0)
+                layoutParams = lp
                 setOnClickListener {
                     val snoozeAt = System.currentTimeMillis() + minutes.toLong() * 60_000L
                     AlarmScheduler.schedule(
@@ -142,13 +211,20 @@ class RingActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     recordAlarmUpdate(alarmId, snoozeAt, baseAt, false)
                     stopAlarmAndClose(cancelNotification = true)
                 }
-            })
+            }
+            snoozeRow.addView(btn)
         }
 
-        root.addView(HorizontalScrollView(this).apply {
+        val scroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             addView(snoozeRow)
-        })
+        }
+        card.addView(scroll)
+
+        root.addView(card, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
 
         return root
     }
